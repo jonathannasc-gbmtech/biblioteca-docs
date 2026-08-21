@@ -96,10 +96,14 @@ só pra conversar.
 
 ### Cadastro (uma vez, por máquina)
 
-Não tem passo manual — clone o repo, abra uma sessão do Claude Code dentro
-dele, e a skill `biblioteca-setup` dispara sozinha na primeira vez (detecta
-que `biblioteca.config.json` ainda não existe). Ela pergunta, uma de cada
-vez:
+No GitHub, abra o repositório `biblioteca-docs` e clique em **"Use this
+template"** pra criar o seu próprio repositório — nunca clone nem dê fork
+direto de `biblioteca-docs` (ele é o starter kit público e deve continuar
+sempre limpo, sem dado pessoal de ninguém; só o mantenedor tem permissão
+de push nele). Clone o repositório novo que você acabou de criar, abra uma
+sessão do Claude Code dentro dele, e a skill `biblioteca-setup` dispara
+sozinha na primeira vez (detecta que `biblioteca.config.json` ainda não
+existe). Ela pergunta, uma de cada vez:
 
 1. **Seu nome** — vira o autor dos documentos que você criar.
 2. **Onde ficam os repositórios dos seus projetos** — pra saber onde entrar
