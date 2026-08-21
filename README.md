@@ -204,6 +204,8 @@ sessão do Claude Code abre dentro de `dashboard-visual/`.
 | Skill | Papel |
 |-------|-------|
 | `controle-documentacao` | Criar, editar, status e indexação — gate obrigatório antes de gravar qualquer doc |
+| `biblioteca-setup` | Cadastro guiado na primeira sessão (autor, path dos repos, Azure DevOps) |
+| `importar-historico-github` | Povoa `resumo/` a partir do histórico de PRs no GitHub — ótimo pra usuário novo com tasks já resolvidas antes de existir a Biblioteca |
 | `task-hub-resume` / `task-hub-complete` / `task-hub-qa` | Acionadas pelos botões do dashboard (`dashboard-visual/.claude/skills/`) |
 | *(suas skills de teste, se tiver)* | Alimentam a seção de testes de cada task |
 

@@ -39,7 +39,7 @@ function Get-LibRoot { return $script:LibRoot }
 # fallback (ex.: desligar a feature) em vez de travar com path/URL alheio.
 function Get-BibliotecaConfig {
     $configPath = Join-Path $script:LibRoot 'biblioteca.config.json'
-    $empty = [PSCustomObject]@{ author = $null; reposBasePath = $null; azureOrgUrl = $null; defaultBranch = $null }
+    $empty = [PSCustomObject]@{ author = $null; reposBasePath = $null; azureOrgUrl = $null; defaultBranch = $null; githubOrg = $null }
     if (-not (Test-Path $configPath)) { return $empty }
     try {
         $raw = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
@@ -51,6 +51,7 @@ function Get-BibliotecaConfig {
         reposBasePath = if ($raw.reposBasePath) { $raw.reposBasePath } else { $null }
         azureOrgUrl   = if ($raw.azureOrgUrl) { $raw.azureOrgUrl } else { $null }
         defaultBranch = if ($raw.defaultBranch) { $raw.defaultBranch } else { $null }
+        githubOrg     = if ($raw.githubOrg) { $raw.githubOrg } else { $null }
     }
 }
 

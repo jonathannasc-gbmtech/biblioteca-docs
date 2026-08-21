@@ -96,6 +96,11 @@ sugerir commitar.
    `_ferramenta/dashboard-visual/dashboard.html` no navegador pra ver o
    dashboard — comece criando sua primeira task pela skill
    `controle-documentacao`."
+4. Se o usuário já usa GitHub (`gh` autenticado), sugerir — sem perguntar
+   nem bloquear, só mencionar: "Se você já resolveu tasks antes de existir
+   a Biblioteca, rode a skill `importar-historico-github` pra povoar
+   automaticamente um `resumo` por task a partir do seu histórico de Pull
+   Requests — dá pra começar com o dashboard já populado em vez de vazio."
 
 ## O que essa skill NÃO faz
 
