@@ -111,8 +111,16 @@ vez:
    mostra o título encontrado). Não usa Azure DevOps? Pula essa pergunta —
    a pill correspondente simplesmente não aparece em nenhum card.
 
-No fim, ela grava `biblioteca.config.json` (arquivo pessoal, fora do Git) e
-já roda a primeira sincronização — o dashboard abre pronto pra uso.
+No fim, ela grava `biblioteca.config.json` (arquivo pessoal, fora do Git),
+já roda a primeira sincronização **e abre o `dashboard.html` sozinha no
+navegador** — sem precisar caçar o arquivo na pasta.
+
+> **A skill não disparou sozinha?** Acontece — o gatilho automático depende
+> do agente notar, na primeira mensagem da sessão, que `biblioteca.config.json`
+> ainda não existe, e isso nem sempre acontece de primeira. Nesse caso, basta
+> pedir explicitamente: *"roda a skill biblioteca-setup, depois a skill
+> importar-historico-github"* (a segunda é opcional, só se você já usa
+> GitHub e quer o dashboard populado com o histórico de PRs, ver abaixo).
 
 ### Uso do dia a dia
 
@@ -205,7 +213,7 @@ sessão do Claude Code abre dentro de `dashboard-visual/`.
 |-------|-------|
 | `controle-documentacao` | Criar, editar, status e indexação — gate obrigatório antes de gravar qualquer doc |
 | `biblioteca-setup` | Cadastro guiado na primeira sessão (autor, path dos repos, Azure DevOps) |
-| `importar-historico-github` | Povoa `resumo/` a partir do histórico de PRs no GitHub — ótimo pra usuário novo com tasks já resolvidas antes de existir a Biblioteca |
+| `importar-historico-github` | Povoa `resumo/` a partir do histórico de PRs no GitHub — ótimo pra usuário novo com tasks já resolvidas antes de existir a Biblioteca. PR sem número de task no título (convenção diferente da do GBM) não é descartada — vira `cluster` agrupado por scope do commit ou por título, fallback automático |
 | `task-hub-resume` / `task-hub-complete` / `task-hub-qa` | Acionadas pelos botões do dashboard (`dashboard-visual/.claude/skills/`) |
 | *(suas skills de teste, se tiver)* | Alimentam a seção de testes de cada task |
 

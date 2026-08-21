@@ -5,9 +5,9 @@
 #
 # So' gera `resumo` (status/PR links) - e' o suficiente pro dashboard
 # mostrar cards de verdade com pill de PR colorido. Sem dry-run (decisao
-# do usuario): aplica direto, pula grupos (task+repo) que ja tem resumo.
-# Sem ferramenta de limpeza pra entrada errada/duplicada ainda (fora de
-# escopo, ver plano) - usuario esta ciente.
+# do usuario): aplica direto, pula grupos (task+repo ou cluster+repo) que
+# ja tem resumo. Sem ferramenta de limpeza pra entrada errada/duplicada
+# ainda (fora de escopo, ver plano) - usuario esta ciente.
 param(
     [string]$Org,
     [int]$Limit = 500
@@ -53,24 +53,56 @@ foreach ($pr in $open) { $allPrs += [PSCustomObject]@{ Number = $pr.number; Titl
 
 Write-Host "backfill-github-prs: $($allPrs.Count) PR(s) encontrada(s) no total (mergeadas + abertas)."
 
-# So' PR com titulo no padrao "tipo(NNNNN): assunto" (ou "tipo(NNNNN-slug):
-# assunto") - convencao de commitlint do GBM. Titulo fora do padrao e'
-# ignorado, sem tentar adivinhar a task (ex.: PRs de migrations costumam
-# ser "feat: seed ..." sem escopo nenhum - ficam de fora mesmo).
-$titlePattern = '^\w+\((\d+)(?:-[\w-]+)?\):\s*(.+)$'
-$groups = @{}
-$ignored = 0
+# Classificacao do titulo em 3 trilhas, cada PR cai na primeira que bater -
+# nenhuma delas "adivinha" um numero de task, so' organiza pelo que ja esta
+# escrito no titulo:
+#
+# 1. Convencao de commitlint do GBM - "tipo(NNNNN): assunto" (ou
+#    "tipo(NNNNN-slug): assunto") - vira task numerica de verdade.
+# 2. Conventional commit generico com escopo nao-numerico - "tipo(scope):
+#    assunto" (ex.: "fix(wagons): ...", quando o time nao usa numero de
+#    task no escopo) - vira `task: general` + `cluster: {scope}`, agrupado
+#    por scope+repo.
+# 3. Sem escopo nenhum (ex.: "Develop", "Revert ...") - vira `task: general`
+#    + `cluster: {titulo tal como veio}`, agrupado por titulo+repo (titulo
+#    identico no mesmo repo cai no mesmo card - "card avulso por titulo").
+$numericPattern = '^\w+\((\d+)(?:-[\w-]+)?\):\s*(.+)$'
+$scopePattern = '^\w+\(([^\)]+)\):\s*(.+)$'
+
+$taskGroups = @{}
+$scopeGroups = @{}
+$titleGroups = @{}
+
 foreach ($pr in $allPrs) {
-    if ($pr.Title -notmatch $titlePattern) { $ignored++; continue }
-    $taskId = $Matches[1]
-    $subject = $Matches[2].Trim()
-    $key = "$taskId|$($pr.Repo)"
-    if (-not $groups.ContainsKey($key)) {
-        $groups[$key] = [PSCustomObject]@{ TaskId = $taskId; Repo = $pr.Repo; Prs = New-Object System.Collections.Generic.List[object] }
+    if ($pr.Title -match $numericPattern) {
+        $taskId = $Matches[1]
+        $subject = $Matches[2].Trim()
+        $key = "$taskId|$($pr.Repo)"
+        if (-not $taskGroups.ContainsKey($key)) {
+            $taskGroups[$key] = [PSCustomObject]@{ Repo = $pr.Repo; Task = $taskId; Cluster = $null; Kind = $null; Prs = New-Object System.Collections.Generic.List[object] }
+        }
+        $taskGroups[$key].Prs.Add([PSCustomObject]@{ Number = $pr.Number; Url = $pr.Url; State = $pr.State; Subject = $subject })
+        continue
     }
-    $groups[$key].Prs.Add([PSCustomObject]@{ Number = $pr.Number; Url = $pr.Url; State = $pr.State; Subject = $subject })
+    if ($pr.Title -match $scopePattern) {
+        $scope = $Matches[1].Trim()
+        $subject = $Matches[2].Trim()
+        $key = "$scope|$($pr.Repo)"
+        if (-not $scopeGroups.ContainsKey($key)) {
+            $scopeGroups[$key] = [PSCustomObject]@{ Repo = $pr.Repo; Task = 'general'; Cluster = $scope; Kind = 'scope'; Prs = New-Object System.Collections.Generic.List[object] }
+        }
+        $scopeGroups[$key].Prs.Add([PSCustomObject]@{ Number = $pr.Number; Url = $pr.Url; State = $pr.State; Subject = $subject })
+        continue
+    }
+    $title = $pr.Title.Trim()
+    $key = "$title|$($pr.Repo)"
+    if (-not $titleGroups.ContainsKey($key)) {
+        $titleGroups[$key] = [PSCustomObject]@{ Repo = $pr.Repo; Task = 'general'; Cluster = $title; Kind = 'title'; Prs = New-Object System.Collections.Generic.List[object] }
+    }
+    $titleGroups[$key].Prs.Add([PSCustomObject]@{ Number = $pr.Number; Url = $pr.Url; State = $pr.State; Subject = $title })
 }
-Write-Host "backfill-github-prs: $($groups.Count) grupo(s) task+repo com titulo reconhecido ($ignored PR(s) ignorada(s) - titulo fora do padrao tipo(NNNNN): assunto)."
+
+Write-Host "backfill-github-prs: $($taskGroups.Count) grupo(s) por numero de task, $($scopeGroups.Count) grupo(s) por scope (fallback), $($titleGroups.Count) grupo(s) avulso(s) por titulo (fallback)."
 
 # Mesma convencao de classificacao de repo usada em Get-PrKindInfo/
 # Get-LayerStatusHtml (build-dashboard.ps1) - migrations/tooling cai em
@@ -104,52 +136,73 @@ function Test-ResumoExists([string]$taskId, [string]$repo) {
     return $false
 }
 
+# Equivalente pra grupos `task: general` - mesmo grep de `cluster:`+`repo:`
+# ja documentado em controle-documentacao pra esse caso.
+function Test-ResumoExistsCluster([string]$cluster, [string]$repo) {
+    $resumoDir = Join-Path $root 'resumo'
+    if (-not (Test-Path $resumoDir)) { return $false }
+    $files = Get-ChildItem -Path $resumoDir -Recurse -Filter '*.md' -ErrorAction SilentlyContinue
+    foreach ($f in $files) {
+        $raw = [IO.File]::ReadAllText($f.FullName)
+        $p = Parse-Frontmatter $raw
+        if ($p -and (Clean-Field $p.Meta['cluster']) -eq $cluster -and (Clean-Field $p.Meta['repo']) -eq $repo) { return $true }
+    }
+    return $false
+}
+
 $allDocs = Get-DocumentFiles $root
-$nextNumber = Get-NextNumber $allDocs
+$script:nextNumber = Get-NextNumber $allDocs
 $created = 0
 $skipped = 0
 $today = Get-Date -Format 'yyyy-MM-dd'
 
-foreach ($key in $groups.Keys) {
-    $g = $groups[$key]
-    if (Test-ResumoExists $g.TaskId $g.Repo) { $skipped++; continue }
+# Escreve um resumo pra um grupo (task numerica OU cluster general) -
+# compartilhada pelas 3 trilhas, pra nao triplicar frontmatter/corpo/escrita.
+function Write-BackfillResumo([PSCustomObject]$group) {
+    $alreadyExists = if ($group.Cluster) { Test-ResumoExistsCluster $group.Cluster $group.Repo } else { Test-ResumoExists $group.Task $group.Repo }
+    if ($alreadyExists) { return $false }
 
-    $layer = Get-RepoLayer $g.Repo
-    $prsSorted = @($g.Prs | Sort-Object Number -Descending)
+    $layer = Get-RepoLayer $group.Repo
+    $prsSorted = @($group.Prs | Sort-Object Number -Descending)
     $latestSubject = $prsSorted[0].Subject
-    $slug = Get-Slug $latestSubject
-    $allMerged = @($g.Prs | Where-Object { $_.State -ne 'merged' }).Count -eq 0
+    $slug = Get-Slug (if ($group.Cluster) { $group.Cluster } else { $latestSubject })
+    $allMerged = @($group.Prs | Where-Object { $_.State -ne 'merged' }).Count -eq 0
     $status = if ($allMerged) { 'completed' } else { 'in_progress' }
 
-    $mergedUrls = @($g.Prs | Where-Object { $_.State -eq 'merged' } | ForEach-Object { $_.Url })
-    $openUrls = @($g.Prs | Where-Object { $_.State -eq 'open' } | ForEach-Object { $_.Url })
+    $mergedUrls = @($group.Prs | Where-Object { $_.State -eq 'merged' } | ForEach-Object { $_.Url })
+    $openUrls = @($group.Prs | Where-Object { $_.State -eq 'open' } | ForEach-Object { $_.Url })
 
     $prLines = ($prsSorted | ForEach-Object {
         $stateLabel = if ($_.State -eq 'merged') { 'mergeado' } else { 'aberto' }
-        "- [$($g.Repo)#$($_.Number)]($($_.Url)) $($script:EmDash) $stateLabel $($script:EmDash) $($_.Subject)"
+        "- [$($group.Repo)#$($_.Number)]($($_.Url)) $($script:EmDash) $stateLabel $($script:EmDash) $($_.Subject)"
     }) -join "`n"
 
     $meta = [ordered]@{
-        number   = "$nextNumber"
+        number   = "$script:nextNumber"
         type     = 'resumo'
         status   = $status
-        repo     = $g.Repo
-        task     = $g.TaskId
+        repo     = $group.Repo
+        task     = $group.Task
         function = $latestSubject
         stub     = [char]0x2014
     }
+    if ($group.Cluster) { $meta['cluster'] = $group.Cluster }
     if ($mergedUrls.Count -gt 0) { $meta['pr_merged'] = ($mergedUrls -join ' ') }
     if ($openUrls.Count -gt 0) { $meta['pr_pending'] = ($openUrls -join ' ') }
     $meta['updated'] = $today
     $meta['author'] = if ($config.author) { $config.author } else { [char]0x2014 }
 
+    $titleSuffix = if ($group.Cluster) { $group.Cluster } else { "$latestSubject ($($group.Task))" }
+    $groupedByLabel = switch ($group.Kind) { 'scope' { 'scope do commit' }; 'title' { 'titulo' }; default { $null } }
+    $clusterNote = if ($groupedByLabel) { "sem numero de task formal no titulo da PR - agrupado por $groupedByLabel, " } else { '' }
+
     $body = @"
-# Resumo $($script:EmDash) $latestSubject ($($g.TaskId))
+# Resumo $($script:EmDash) $titleSuffix
 
 ## Status atual
 
 Gerado automaticamente a partir do historico de Pull Requests no GitHub
-(backfill inicial, sem task-code/planning detalhado) - $($g.Prs.Count) PR(s):
+(backfill inicial, $($clusterNote)sem task-code/planning detalhado) - $($group.Prs.Count) PR(s):
 
 $prLines
 
@@ -168,7 +221,7 @@ $prLines
 - Nada registrado - ver PR(s) acima pro diff real
 "@
 
-    $fileName = "$nextNumber-resumo-$($g.TaskId)-$slug.md"
+    $fileName = "$script:nextNumber-resumo-$slug-$($group.Task).md"
     $destDir = Join-Path $root "resumo\$layer"
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     $destPath = Join-Path $destDir $fileName
@@ -176,9 +229,19 @@ $prLines
     [IO.File]::WriteAllText($destPath, (Serialize-Frontmatter $meta) + $body)
     Sync-DocumentFile $destPath | Out-Null
 
-    Write-Host "  criado: resumo/$layer/$fileName (task $($g.TaskId), $($g.Repo), $status)"
-    $nextNumber++
-    $created++
+    Write-Host "  criado: resumo/$layer/$fileName ($($group.Repo), $status)"
+    $script:nextNumber++
+    return $true
+}
+
+foreach ($key in $taskGroups.Keys) {
+    if (Write-BackfillResumo $taskGroups[$key]) { $created++ } else { $skipped++ }
+}
+foreach ($key in $scopeGroups.Keys) {
+    if (Write-BackfillResumo $scopeGroups[$key]) { $created++ } else { $skipped++ }
+}
+foreach ($key in $titleGroups.Keys) {
+    if (Write-BackfillResumo $titleGroups[$key]) { $created++ } else { $skipped++ }
 }
 
 Write-Host "backfill-github-prs: $created resumo(s) criado(s), $skipped pulado(s) (ja existia)."

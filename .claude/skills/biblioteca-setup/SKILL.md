@@ -92,10 +92,15 @@ sugerir commitar.
 
 1. Rodar `powershell -ExecutionPolicy Bypass -File _ferramenta/scripts/sync-all.ps1`.
 2. Confirmar que rodou sem erro (lint-clusters ok, dashboard gerado).
-3. Avisar o usuário: "Configurado. Abra
-   `_ferramenta/dashboard-visual/dashboard.html` no navegador pra ver o
-   dashboard — comece criando sua primeira task pela skill
-   `controle-documentacao`."
+3. **Abrir o dashboard sozinho no navegador** — não só avisar o usuário
+   pra abrir manualmente (ele não deve precisar navegar até o arquivo):
+   `Start-Process "_ferramenta/dashboard-visual/dashboard.html"` (path
+   relativo à raiz do repo — o handler default do Windows pra `.html` é o
+   navegador). Depois, avisar: "Configurado — já abri o dashboard no
+   navegador. Comece criando sua primeira task pela skill
+   `controle-documentacao`." Se `Start-Process` falhar por qualquer motivo
+   (máquina sem GUI, etc.), cair pro fallback de sempre: avisar o path do
+   arquivo pra abrir manualmente.
 4. Se o usuário já usa GitHub (`gh` autenticado), sugerir — sem perguntar
    nem bloquear, só mencionar: "Se você já resolveu tasks antes de existir
    a Biblioteca, rode a skill `importar-historico-github` pra povoar

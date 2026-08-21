@@ -25,18 +25,30 @@ Roda `_ferramenta/scripts/backfill-github-prs.ps1`, que:
 
 1. Busca via `gh search prs --owner {org} --author @me` (mergeadas +
    abertas) - sem precisar clonar nenhum repo.
-2. Extrai o numero da task do **titulo** da PR, convencao de commitlint
-   do GBM (`tipo(NNNNN): assunto` ou `tipo(NNNNN-slug): assunto`). PR com
-   titulo fora desse padrao e' ignorada (sem adivinhar).
-3. Agrupa por task+repo (uma task cross-repo vira um card por repo, igual
-   ao resto da Biblioteca) e classifica frontend/backend pelo nome do
-   repo (mesma convencao do `Get-PrKindInfo` no dashboard).
+2. Classifica cada PR pelo **titulo**, em 3 trilhas (cada PR cai na
+   primeira que bater - nenhuma delas adivinha um numero de task, so'
+   organiza pelo que ja esta escrito no titulo):
+   - **Numerica** - convencao de commitlint do GBM (`tipo(NNNNN): assunto`
+     ou `tipo(NNNNN-slug): assunto`) -> vira task numerica de verdade.
+   - **Scope (fallback)** - conventional commit generico com escopo
+     nao-numerico (`tipo(scope): assunto`, ex.: `fix(wagons): ...`, pra
+     quem nao usa numero de task no escopo do commit) -> vira
+     `task: general` + `cluster: {scope}`, agrupado por scope+repo.
+   - **Titulo avulso (fallback)** - sem escopo nenhum (ex.: `Develop`,
+     `Revert ...`) -> vira `task: general` + `cluster: {titulo tal como
+     veio}`, agrupado por titulo+repo (titulo identico no mesmo repo cai
+     no mesmo card).
+3. Agrupa por task+repo (task numerica) ou cluster+repo (fallback) - uma
+   task cross-repo vira um card por repo, igual ao resto da Biblioteca -
+   e classifica frontend/backend pelo nome do repo (mesma convencao do
+   `Get-PrKindInfo` no dashboard).
 4. Gera um `resumo` minimo por grupo - `status`, `pr_merged`/`pr_pending`,
    e um corpo deixando claro que e' backfill automatico (sem
    task-code/planning, sem contexto de negocio, so' o que da pra saber
    pelo titulo da PR).
 5. Pula grupos que ja tem `resumo` (nao sobrescreve nada real nem um
-   backfill anterior).
+   backfill anterior) - checagem por task+repo ou cluster+repo, conforme
+   a trilha.
 6. Roda `sync-all.ps1` no final se criou algo.
 
 **Aplica direto, sem preview** - decisao do usuario (2026-08-21): pode
@@ -62,13 +74,15 @@ rodar `sync-all.ps1`, nao ha comando dedicado ainda).
 powershell -ExecutionPolicy Bypass -File _ferramenta/scripts/backfill-github-prs.ps1 -Org gbmtech
 ```
 
-Reportar ao usuario, ao final: quantos `resumo` foram criados, quantos
-foram pulados (ja existiam), quantas PRs foram ignoradas (titulo fora do
-padrao).
+Reportar ao usuario, ao final (o proprio script ja imprime isso): quantos
+grupos cairam em cada trilha (numerica / scope-fallback / titulo-fallback),
+quantos `resumo` foram criados, quantos foram pulados (ja existiam).
 
 ## O que essa skill NAO faz
 
 Nao gera `task-code`/`task-planning`/`testes` (exigiria ler diff de
 codigo de verdade - fora do que da pra automatizar so' com titulo/link de
-PR). Nao remove nem corrige backfill anterior (sem ferramenta de limpeza
+PR). Nao inventa numero de task - PR sem numero no titulo vira `cluster`
+(fallback por scope ou por titulo, ver acima), nunca um numero chutado.
+Nao remove nem corrige backfill anterior (sem ferramenta de limpeza
 ainda). Nao pede confirmacao/preview antes de gravar - aplica direto.

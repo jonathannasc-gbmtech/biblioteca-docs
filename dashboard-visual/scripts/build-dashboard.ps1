@@ -46,6 +46,7 @@ $paletteIcon = '<svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" c
 $archiveIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="6" width="12" height="8" rx="1"/><path d="M2 6l1-3h10l1 3"/></svg>'
 $pendIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.3"/><path d="M5.5 8l1.8 1.8L10.8 6"/></svg>'
 $searchIcon = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>'
+$mockIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8z"/><circle cx="8" cy="8" r="1.8" fill="currentColor" stroke="none"/></svg>'
 
 # Icones do "tipo de repo" do PR (backend/frontend/migration) - trocam o
 # $githubIcon generico no pill de PR, inferido do nome do repo na propria
@@ -2003,6 +2004,7 @@ $body = @"
   <a class="palette-link" href="paleta.html" target="_blank">$paletteIcon Paleta de cores</a>
   <a class="palette-link" href="archive.html" target="_blank">$archiveIcon Arquivo</a>
   <a class="palette-link" href="pendencias.html" target="_blank">$pendIcon Pendencias$(if ($pendenciasCount) { " ($pendenciasCount)" })</a>
+  <a class="palette-link" href="mock/dashboard-mock.html" target="_blank">$mockIcon Mock</a>
 </header>
 
 <h2>Ativas</h2>
