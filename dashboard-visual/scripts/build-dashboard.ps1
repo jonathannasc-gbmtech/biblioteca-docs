@@ -56,6 +56,24 @@ $backendIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stro
 $frontendIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M6 14.5h4M8 11.5v3"/></svg>'
 $migrationIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5h9.5m0 0L10 3M12.5 5.5L10 8"/><path d="M13 10.5H3.5m0 0L6 8M3.5 10.5L6 13"/></svg>'
 
+# Cards irmaos da mesma task (task numerica igual, ou mesmo cluster exato
+# pra task "general") - inclui o proprio $card. Le $cardsByTask/
+# $cardsByCluster (script scope, montados logo apos $cards ficar pronto,
+# antes de qualquer chamada a esta funcao). Usada por qualquer lugar que
+# precisa agregar dado cross-repo da mesma task (PRs, estado de PR, testes,
+# tasks relacionadas).
+function Get-TaskSiblings([PSCustomObject]$card) {
+    $siblings = if ($card.Task -match '^\d+$') {
+        @($cardsByTask[$card.Task])
+    } elseif ($card.Cluster) {
+        @($cardsByCluster[$card.Cluster])
+    } else {
+        @()
+    }
+    if ($siblings.Count -eq 0) { return @($card) }
+    return $siblings
+}
+
 # Classifica o PR pelo nome do repo na propria URL - sem depender de campo
 # novo no frontmatter. Fallback pro icone generico do github se o nome nao
 # bater com nenhuma convencao conhecida (repo pessoal, nome atipico etc.).
@@ -77,19 +95,14 @@ function Get-PrKindInfo([string]$prUrl) {
 # pouco legivel e nao confiavel). Verde = feito, vermelho = pendente,
 # amarelo = camada nao existe nesta task (nenhum PR/doc encontrado).
 function Get-LayerStatusHtml([PSCustomObject]$card) {
-    $siblings = if ($card.Task -match '^\d+$') {
-        @($cardsByTask[$card.Task])
-    } elseif ($card.Cluster) {
-        @($cardsByCluster[$card.Cluster])
-    } else {
-        @()
-    }
-    if ($siblings.Count -eq 0) { $siblings = @($card) }
+    $siblings = Get-TaskSiblings $card
 
-    $allPrs = New-Object System.Collections.Generic.List[string]
+    # $card.Signals.PRs ja vem agregado entre irmaos (ver loop logo apos
+    # $cardsByTask/$cardsByCluster serem montados) - so os docs (pra checar
+    # estado/testes) ainda precisam da lista de irmaos aqui.
+    $allPrs = @($card.Signals.PRs)
     $allDocs = New-Object System.Collections.Generic.List[object]
     foreach ($s in $siblings) {
-        foreach ($pr in $s.Signals.PRs) { if (-not $allPrs.Contains($pr)) { $allPrs.Add($pr) } }
         foreach ($d in $s.Docs) { $allDocs.Add($d) }
         if ($s.ResumoDoc) { $allDocs.Add($s.ResumoDoc) }
     }
@@ -109,16 +122,60 @@ function Get-LayerStatusHtml([PSCustomObject]$card) {
         return 'done'
     }
 
+    # Isola o texto de UMA secao "## Titulo" ate a proxima "## " (ou fim do
+    # doc) - split com lookahead, sem regex multilinha fragil. So' a
+    # primeira linha do trecho e' comparada contra o titulo procurado.
+    function Get-SectionText([string]$body, [string]$headingSubstring) {
+        $parts = $body -split '(?m)(?=^## )'
+        foreach ($p in $parts) {
+            $firstLine = ($p -split "`n")[0]
+            if ($firstLine -match [regex]::Escape($headingSubstring)) { return $p }
+        }
+        return $null
+    }
+
+    # Heuristica sobre texto ja convencionado (mesma familia de risco da
+    # antiga extracao de pendencias, escopo bem mais restrito): secao
+    # "## Testes unitarios" (padrao backend) ou "## Verificacao estatica"
+    # (papel equivalente no frontend, tsc/biome/build) = camada unitaria;
+    # "## Testes manuais" = camada manual. Sem secao em nenhum doc irmao
+    # `testes/` = amarelo (nao necessario). Com secao, procura marcador
+    # negativo ja usado na convencao atual (cross/hourglass emoji, "pendente",
+    # "nao executado") dentro DAQUELE trecho especifico, nao o doc inteiro - senao um doc
+    # com unitario verde + manual pendente contaminaria os dois).
+    function Get-TestTypeState([string]$headingSubstring, [string[]]$negativeMarkers) {
+        $sections = @($testesDocs | ForEach-Object { Get-SectionText $_.Body $headingSubstring } | Where-Object { $_ })
+        if ($sections.Count -eq 0) { return 'na' }
+        foreach ($sec in $sections) {
+            foreach ($marker in $negativeMarkers) {
+                if ($sec -match $marker) { return 'pending' }
+            }
+        }
+        return 'done'
+    }
+
+    # Caracteres especiais via codepoint, nao literal - este arquivo nao tem
+    # BOM, PowerShell 5.1 le como ANSI e corrompe qualquer char nao-ASCII
+    # digitado direto no source (mesmo motivo do $script:EmDash em
+    # lib-doc.ps1 e do $emDash em export-public.ps1).
+    $crossmark = [char]0x274C
+    $hourglass = [char]0x23F3
+    $aTilde = [char]0x00E3
+    $aAcute = [char]0x00E1
+
     $testesDocs = @($allDocs | Where-Object { $_.Type -eq 'testes' })
-    $testState = if ($testesDocs.Count -eq 0) { 'na' }
-                 elseif (@($testesDocs | Where-Object { $_.Status -ne 'completed' }).Count -gt 0) { 'pending' }
-                 else { 'done' }
+    $unitState = Get-TestTypeState 'Testes unitarios' @($crossmark, '(?i)falhou', '(?i)regress\w* encontrada')
+    if ($unitState -eq 'na') {
+        $unitState = Get-TestTypeState 'Verifica' @($crossmark, '(?i)falhou')
+    }
+    $manualState = Get-TestTypeState 'Testes manuais' @($hourglass, '(?i)pendente', "(?i)n${aTilde}o executado")
 
     $layers = @(
         @{ Label = 'Migrations'; State = (Get-LayerState 'migrations') }
         @{ Label = 'Backend'; State = (Get-LayerState 'backend') }
         @{ Label = 'Frontend'; State = (Get-LayerState 'frontend') }
-        @{ Label = 'Testes'; State = $testState }
+        @{ Label = "Testes unit${aAcute}rios"; State = $unitState }
+        @{ Label = 'Testes manuais'; State = $manualState }
     )
     $rows = ($layers | ForEach-Object {
         $stateLabel = switch ($_.State) { 'done' { 'feito' }; 'pending' { 'pendente' }; default { 'nao necessario' } }
@@ -147,8 +204,9 @@ function Get-Signals($docs) {
 # comando ja digitado (launch-command.vbs), sem apertar Enter. Some sem
 # erro em navegador/maquina sem o protocolo registrado - so o clipboard
 # (fallback de sempre) continua funcionando.
-function Get-LaunchUri([string]$cmdText) {
-    return 'biblioteca-cmd:' + [Uri]::EscapeDataString($cmdText)
+function Get-LaunchUri([string]$cmdText, [switch]$AutoRun) {
+    $scheme = if ($AutoRun) { 'biblioteca-cmd-run:' } else { 'biblioteca-cmd:' }
+    return $scheme + [Uri]::EscapeDataString($cmdText)
 }
 
 function Get-CardCommands([PSCustomObject]$card) {
@@ -159,7 +217,7 @@ function Get-CardCommands([PSCustomObject]$card) {
     $cmds = New-Object System.Collections.Generic.List[PSCustomObject]
     if ($card.Active) {
         $cmd = "powershell -NoProfile -Command `"$base; claude 'retomar task $($card.Task) no repo $($card.Repo)'`""
-        $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = Get-LaunchUri $cmd })
+        $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = (Get-LaunchUri $cmd -AutoRun) })
     }
     $qaCmd = "powershell -NoProfile -Command `"$base; claude 'ajustar qa task $($card.Task) no repo $($card.Repo)'`""
     $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = Get-LaunchUri $qaCmd })
@@ -175,7 +233,16 @@ function Get-ExtLinksHtml([PSCustomObject]$card) {
         $azureUrl = "$azureBase/$($card.Task)"
         $extLinks.Add("<a class=`"ext-link ext-azure`" href=`"$azureUrl`" target=`"_blank`" title=`"Abrir work item no Azure DevOps`">$linkIcon Azure</a>")
     }
-    $cardDocsForState = @($card.Docs) + $card.ResumoDoc | Where-Object { $_ }
+    # Estado (mergeado/aberto/rejeitado) precisa olhar os docs de TODOS os
+    # irmaos da mesma task, nao so' os do proprio repo - senao um PR
+    # "emprestado" de outro repo (ja incluido em Signals.PRs pela agregacao
+    # cross-repo acima) aparece na cor certa num card e cinza no outro,
+    # dependendo de qual repo tem o campo pr_merged daquele PR especifico.
+    $cardDocsForState = New-Object System.Collections.Generic.List[object]
+    foreach ($s in (Get-TaskSiblings $card)) {
+        foreach ($d in $s.Docs) { $cardDocsForState.Add($d) }
+        if ($s.ResumoDoc) { $cardDocsForState.Add($s.ResumoDoc) }
+    }
     foreach ($pr in $card.Signals.PRs) {
         $num = if ($pr -match '(\d+)$') { $Matches[1] } else { '' }
         # cor por estado real (igual GitHub: aberto=verde, mergeado=roxo,
@@ -207,14 +274,7 @@ function Get-ExtLinksHtml([PSCustomObject]$card) {
 # pedido explicito (nao entra no card da grade). Le $cardsByTask/
 # $cardsByCluster (script scope, montados depois que $cards esta pronto).
 function Get-RelatedTasksHtml([PSCustomObject]$card) {
-    $siblings = if ($card.Task -match '^\d+$') {
-        @($cardsByTask[$card.Task])
-    } elseif ($card.Cluster) {
-        @($cardsByCluster[$card.Cluster])
-    } else {
-        @()
-    }
-    $siblings = @($siblings | Where-Object { $_ -and $_.RepPath -ne $card.RepPath } | Sort-Object Repo)
+    $siblings = @(Get-TaskSiblings $card | Where-Object { $_ -and $_.RepPath -ne $card.RepPath } | Sort-Object Repo)
     if ($siblings.Count -eq 0) { return '' }
 
     $items = $siblings | ForEach-Object {
@@ -448,8 +508,8 @@ foreach ($g in $groups) {
     $latestDoc = ($docs | Where-Object { $_.Updated } | Sort-Object Updated -Descending | Select-Object -First 1)
     $latest = $latestDoc.Updated
     $latestTime = $latestDoc.UpdatedTime
-    # PR e Azure precisam aparecer em Ativas E Completas - so o status por
-    # camada (Get-LayerStatusHtml) fica restrito a tasks ativas na hora de exibir.
+    # PR, Azure e o status por camada (Get-LayerStatusHtml) aparecem em
+    # Ativas E Completas por igual - nenhum e' restrito a tasks ativas.
     $signals = Get-Signals $docs
     # cluster opcional (so faz diferenca pra task "general" - o card mostra
     # "Geral" por padrao, sem jeito de distinguir varios de cor no dashboard;
@@ -489,6 +549,23 @@ foreach ($c in $cards) {
         if (-not $cardsByCluster.ContainsKey($c.Cluster)) { $cardsByCluster[$c.Cluster] = @() }
         $cardsByCluster[$c.Cluster] += $c
     }
+}
+
+# PRs de um card sao a UNIAO dos PRs de todos os cards irmaos da mesma
+# task (nao so' os PRs mencionados nos docs daquele repo especifico) -
+# sem isso, uma task multi-repo mostra PRs diferentes em cada card (o
+# card do frontend nunca via os PRs do backend e vice-versa, mesmo a task
+# inteira ja estando 100% mergeada). Roda depois do agrupamento acima,
+# antes de qualquer Build-Card/Get-ExtLinksHtml/Get-LayerStatusHtml -
+# os tres passam a enxergar a lista completa automaticamente.
+foreach ($c in $cards) {
+    $siblings = Get-TaskSiblings $c
+    if ($siblings.Count -le 1) { continue }
+    $merged = New-Object System.Collections.Generic.List[string]
+    foreach ($s in $siblings) {
+        foreach ($pr in $s.Signals.PRs) { if (-not $merged.Contains($pr)) { $merged.Add($pr) } }
+    }
+    $c.Signals.PRs = @($merged)
 }
 
 # Conversor leve pro corpo das secoes do resumo - nao e' um motor de
@@ -728,7 +805,7 @@ function Build-Card([PSCustomObject]$card) {
     $timeHtml = if ($card.UpdatedTime) { " <span class=`"updated-time`">$(Esc $card.UpdatedTime)</span>" } else { '' }
     $updatedHtml = if ($card.Updated) { "<span class=`"updated`">Atualizado $(Esc $card.Updated)$timeHtml</span>" } else { '' }
 
-    $posHtml = if ($card.Active) { Get-LayerStatusHtml $card } else { '' }
+    $posHtml = Get-LayerStatusHtml $card
 
     # Links externos (Azure DevOps + PR do GitHub) - aparecem em Ativas E
     # Completas, sempre visiveis mesmo com o card fechado - e' o dado mais
@@ -1635,7 +1712,7 @@ $faviconLink
      cor propria (nao reaproveita --gold/--current) pra ficar universal. */
   .layer-row { display: flex; align-items: center; gap: 7px; font-size: 0.78rem; }
   .layer-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-  .layer-label { color: #c2c4c9; min-width: 72px; }
+  .layer-label { color: #c2c4c9; min-width: 100px; }
   .layer-state { color: var(--text-faint); font-size: 0.72rem; }
   .layer-done .layer-dot { background: #22c55e; }
   .layer-done .layer-state { color: #4ade80; }

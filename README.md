@@ -62,12 +62,14 @@ motivou, quais testes já rodaram — e a parte que mais economiza tempo:
 
 ### "+ Nova Task" — abre o Claude já no repo certo, sem digitar path
 
-Botão no header abre um formulário (link do Azure, repo, descrição) — o
-prompt se monta sozinho numa caixa ao lado, ajustável antes de enviar.
-"Abrir Claude" copia o comando e tenta abrir direto um terminal já na
-pasta do repositório escolhido, via um protocolo customizado
-(`biblioteca-cmd:`, registro único por máquina — opcional, sem ele cai no
-fallback de sempre: copia pro clipboard). Se o MCP `azure-devops`
+Botão no header abre um formulário (link do Azure, repo opcional,
+descrição) — o prompt se monta sozinho numa caixa ao lado, ajustável
+antes de enviar. "Abrir Claude" copia o comando e abre direto um
+terminal já na pasta do repositório escolhido (ou na pasta geral de
+repos, se ainda não souber qual — o Claude descobre depois de ler o
+work item), sem precisar colar, via um protocolo customizado
+(`biblioteca-cmd-run:`, registro único por máquina — opcional, sem ele
+cai no fallback de sempre: copia pro clipboard). Se o MCP `azure-devops`
 (somente leitura, ver abaixo) estiver conectado, o Claude busca sozinho o
 REQ e o item pai daquele work item antes de gravar qualquer documento —
 mostra o link encontrado e pede uma confirmação objetiva, nunca escreve

@@ -120,19 +120,28 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   automática — o usuário roda esse script manualmente quando quiser
   habilitar), ambos entregues pro mesmo `scripts/launch-command.vbs`:
   `biblioteca-cmd:` abre um `cmd` novo e **digita o comando sem apertar
-  Enter** (decisão explícita — usuário revisa e confirma manualmente) e é o
-  padrão pra qualquer ação que dispara skill ou grava algo (retomar/QA/nova
-  task); `biblioteca-cmd-run:` digita **e aperta Enter sozinho** — só usado
-  pelo botão "Abrir Claude" (header), que não dispara skill nem grava nada,
-  é só uma janela solta do Claude. Sem o protocolo registrado, o link
-  simplesmente não faz nada além do clipboard de sempre — degrada bem.
+  Enter** (usuário revisa e confirma manualmente) — hoje só usado por
+  **Ajustes QA**, ação mais sensível (reabre task já concluída/mergeada).
+  `biblioteca-cmd-run:` digita **e aperta Enter sozinho** — usado por
+  **Retomar task**, "+ Nova Task" e o botão "Abrir Claude" (header): as
+  duas primeiras já têm confirmação embutida no próprio fluxo (a skill
+  `task-hub-resume` relê os docs antes de agir; o prompt do Nova Task
+  pede confirmação objetiva do work item antes de gravar qualquer coisa),
+  então a trava extra de "revisar no terminal antes de apertar Enter"
+  virou fricção redundante — decisão do usuário, 2026-08-21. "Abrir
+  Claude" nunca teve skill nem grava nada, sempre foi auto-Enter. Sem o
+  protocolo registrado, o link simplesmente não faz nada além do
+  clipboard de sempre — degrada bem.
 - `nova-task.html` — botão **+ Nova Task** do
   header abre essa página numa aba nova (não pergunta nada por chat de
   saída): formulário com link do Azure, link do parent (opcional), repo
-  (`<datalist>` com os repos já conhecidos + pastas reais de
-  `reposBasePath`) e a demanda em texto livre. Ao gerar o comando, ele
-  **abre o Claude direto na pasta do repositório escolhido** (não mais
-  dentro da própria Biblioteca) com um prompt único e auto-suficiente —
+  **(também opcional)** (`<datalist>` com os repos já conhecidos + pastas
+  reais de `reposBasePath`) e a demanda em texto livre. Ao gerar o
+  comando, ele **abre o Claude direto na pasta do repositório escolhido**
+  — ou na pasta geral de repos (`reposBasePath`), sem repo escolhido; o
+  prompt embutido instrui o Claude a descobrir o repo certo depois de ler
+  o work item via MCP e se mover pra lá antes de gravar qualquer doc
+  (não mais dentro da própria Biblioteca) com um prompt único e auto-suficiente —
   dump completo (Azure/parent/repo/descrição) + instruções embutidas no
   próprio texto: buscar REQ/parent via MCP `azure-devops` (se conectado) e
   confirmar antes de gravar qualquer doc, mover-se pra pasta certa se essa
@@ -147,13 +156,18 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   `.ext-azure`, ícone `$linkIcon` reaproveitado — mesma cor/ícone que já
   representa "Azure" em qualquer outro lugar da Biblioteca), "Repositório"
   (com dica de path absoluto ao vivo conforme digita) e "Demanda". A caixa
-  de **Prompt** é editável e atualiza sozinha a partir dos campos — só
-  para de sincronizar se o usuário editá-la manualmente (mostra um link
-  "recalcular"). Comando powershell bruto fica escondido num `<details>`,
-  não é mais a caixa principal. Botão único **Abrir Claude**
-  (`.claude-btn`, cor terracota — mesma da acima) faz tudo num clique:
-  valida, monta o comando a partir do texto atual do prompt (editado ou
-  não), copia e tenta lançar via `biblioteca-cmd:`.
+  de **Prompt** é editável e sempre reflete os campos ao lado — qualquer
+  mudança num campo reescreve a caixa por cima, sem trava de "edição
+  manual" (existia um modo que travava a sincronização depois do usuário
+  tocar na caixa do prompt, causava a caixa "empacar" e nunca mais
+  atualizar sozinha — removido, 2026-08-21). Quem quiser um texto
+  diferente do gerado edita a caixa de Prompt direto antes de clicar —
+  só dura até o próximo campo mudar. Comando powershell bruto fica
+  escondido num `<details>`, não é mais a caixa principal. Botão único
+  **Abrir Claude** (`.claude-btn`, cor terracota — mesma da acima) faz
+  tudo num clique: valida (só Azure + descrição são obrigatórios), monta
+  o comando a partir do texto atual do prompt, copia e lança direto via
+  `biblioteca-cmd-run:` (auto-Enter, ver acima).
 - **MCP `azure-devops` — SÓ LEITURA, 3 camadas de trava.** Servidor
   oficial da Microsoft (`@azure-devops/mcp`, org Trizy), registrado em
   **escopo user** (`claude mcp add --scope user`, em `~/.claude.json` —

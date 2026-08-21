@@ -104,7 +104,7 @@
 <body>
 <a class="back" href="dashboard.html">&larr; Voltar ao dashboard</a>
 <h1>Nova Task</h1>
-<p class="sub">Preenche os campos - o prompt se monta sozinho na caixa ao lado, pode ajustar antes de abrir. "Abrir Claude" ja copia e tenta abrir direto na pasta do repositorio.</p>
+<p class="sub">Preenche os campos - o prompt se monta sozinho na caixa ao lado, pode ajustar antes de abrir. "Abrir Claude" ja copia e abre direto, sem precisar colar - na pasta do repositorio (ou na pasta geral, se ainda nao souber qual repo).</p>
 
 <div class="nt-grid">
   <div class="nt-col-main">
@@ -119,7 +119,7 @@
 
     <section class="nt-section">
       <h2>Repositorio</h2>
-      <label class="req" for="nt-repo">Repositorio</label>
+      <label class="nt-optional" for="nt-repo">Repositorio (opcional)</label>
       <input type="text" id="nt-repo" list="nt-repos" placeholder="meu-app-frontend" autocomplete="off">
       <datalist id="nt-repos">
 <option value="gbm-app-backoffice-backend">
@@ -143,6 +143,7 @@
 <option value="ponytail">
       </datalist>
       <p class="hint" id="nt-path-hint"></p>
+      <p class="hint">Pode deixar em branco - abre na pasta geral de repositorios e o Claude descobre qual usar depois de ler o work item no Azure DevOps.</p>
     </section>
 
     <section class="nt-section nt-desc-section">
@@ -156,7 +157,6 @@
     <section class="nt-section nt-prompt-section">
       <h2>Prompt (isso vai ser enviado pro Claude)</h2>
       <textarea id="nt-prompt" placeholder="Preencha os campos ao lado - o prompt aparece aqui sozinho."></textarea>
-      <p class="hint" id="nt-recalc-wrap" style="display:none">Editado manualmente - <a href="#" id="nt-recalc">recalcular a partir dos campos</a></p>
       <details>
         <summary>Comando bruto (powershell)</summary>
         <textarea id="nt-output" readonly placeholder="Aparece depois de clicar em Abrir Claude."></textarea>
@@ -179,12 +179,10 @@ var repoEl = document.getElementById('nt-repo');
 var descEl = document.getElementById('nt-desc');
 var promptEl = document.getElementById('nt-prompt');
 var pathHint = document.getElementById('nt-path-hint');
-var recalcWrap = document.getElementById('nt-recalc-wrap');
 var warn = document.getElementById('nt-warn');
 var rawOutput = document.getElementById('nt-output');
 var launch = document.getElementById('nt-launch');
-var manualEdit = false;
-var syncing = false;
+var reposBase = 'C:\\Users\\Jonathan Nascimento\\Documents\\Repo';
 
 // Sem skill dedicada - o prompt e' auto-suficiente: abre direto no repo e
 // usa o fluxo global de skills (gbm-triagem/criar-task-code/plano-acao)
@@ -200,7 +198,11 @@ function buildPromptText() {
   if (!azure && !repo && !desc) { return ''; }
   var parts = [];
   parts.push('Nova demanda - Azure: ' + (azure || '(nao informado)') + (parent ? ' (parent: ' + parent + ')' : '') + '.');
-  parts.push('Repo: ' + (repo || '(nao informado)') + '. Se esta pasta nao for exatamente esse repositorio, mova-se (cd) pra pasta correta antes de seguir.');
+  if (repo) {
+    parts.push('Repo: ' + repo + '. Se esta pasta nao for exatamente esse repositorio, mova-se (cd) pra pasta correta antes de seguir.');
+  } else {
+    parts.push('Repo: nao informado - abriu na pasta geral de repositorios (' + reposBase + '). Depois de ler o work item (e o parent) via MCP azure-devops, descubra qual repositorio corresponde e mova-se (cd) pra pasta dele (' + reposBase + '\\<repo>) antes de gravar qualquer doc.');
+  }
   parts.push('Descricao: ' + (desc || '(nao informado)'));
   parts.push('Antes de gravar qualquer doc: busque REQ/parent via MCP azure-devops se estiver conectado (ferramenta wit_work_item, $expand=relations pra achar o parent - nunca wit_work_item_write/wit_work_item_comment_write/wit_work_item_link_write/wit_backlog). Mostre o link do work item (e do parent, se achar) e peca uma confirmacao objetiva (sim/nao) se e esse mesmo - nao descreva tudo em texto solto, so o link + a pergunta.');
   parts.push('So depois da confirmacao, grave o REQ (e o parent, se houver) em reqs/ na Biblioteca e siga o fluxo normal (gbm-triagem, criar-task-code, plano-acao). A partir dai, use o arquivo salvo como fonte - nao reconsulte o Azure ao vivo de novo pra essa mesma task.');
@@ -210,51 +212,42 @@ function buildPromptText() {
 
 function updatePathHint() {
   var repo = repoEl.value.trim();
-  pathHint.textContent = repo ? ('Vai abrir em: ' + 'C:\\Users\\Jonathan Nascimento\\Documents\\Repo\\' + repo) : '';
+  pathHint.textContent = 'Vai abrir em: ' + (repo ? (reposBase + '\\' + repo) : (reposBase + ' (pasta geral - repositorio a definir)'));
 }
 
+// Sem trava de "edicao manual" - o prompt sempre reflete os campos ao
+// lado. Editar a caixa do prompt direto ainda funciona (o comando final
+// usa o texto dela), so' que qualquer mudanca nos campos reescreve por
+// cima - simples e previsivel, sem estado "travado" que exigia o link
+// "recalcular" (link removido junto).
 function regeneratePrompt() {
-  syncing = true;
   promptEl.value = buildPromptText();
-  syncing = false;
-  manualEdit = false;
-  recalcWrap.style.display = 'none';
 }
 
 [azureEl, parentEl, repoEl, descEl].forEach(function (el) {
   el.addEventListener('input', function () {
-    if (!manualEdit) { regeneratePrompt(); }
+    regeneratePrompt();
     updatePathHint();
   });
 });
 
-promptEl.addEventListener('input', function () {
-  if (syncing) { return; }
-  manualEdit = true;
-  recalcWrap.style.display = 'block';
-});
-
-document.getElementById('nt-recalc').addEventListener('click', function (e) {
-  e.preventDefault();
-  regeneratePrompt();
-});
-
 launch.addEventListener('click', function (e) {
+  e.preventDefault();
   var azure = azureEl.value.trim();
   var repo = repoEl.value.trim();
   var desc = descEl.value.trim();
-  if (!azure || !repo || !desc) {
-    e.preventDefault();
-    warn.textContent = 'Preencha ao menos o link do Azure, o repositorio e a descricao.';
+  if (!azure || !desc) {
+    warn.textContent = 'Preencha ao menos o link do Azure e a descricao.';
     return;
   }
   warn.textContent = '';
   var promptOneLine = promptEl.value.trim().replace(/\r\n|\r|\n/g, '\\n').replace(/"/g, "'");
   var escapedPhrase = promptOneLine.replace(/'/g, "''");
-  var cmd = 'powershell -NoProfile -Command "cd \'C:\\Users\\Jonathan Nascimento\\Documents\\Repo\\' + repo + '\'; claude \'' + escapedPhrase + '\'"';
+  var targetDir = repo ? (reposBase + '\\' + repo) : reposBase;
+  var cmd = 'powershell -NoProfile -Command "cd \'' + targetDir + '\'; claude \'' + escapedPhrase + '\'"';
 
   rawOutput.value = cmd;
-  launch.setAttribute('href', 'biblioteca-cmd:' + encodeURIComponent(cmd));
+  var launchUrl = 'biblioteca-cmd-run:' + encodeURIComponent(cmd);
 
   function fallback() {
     var ta = document.createElement('textarea');
@@ -264,10 +257,12 @@ launch.addEventListener('click', function (e) {
     try { document.execCommand('copy'); } catch (err) {}
     document.body.removeChild(ta);
   }
+  function goLaunch() { window.location.href = launchUrl; }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(cmd).catch(fallback);
+    navigator.clipboard.writeText(cmd).then(goLaunch).catch(function () { fallback(); goLaunch(); });
   } else {
     fallback();
+    goLaunch();
   }
 });
 </script>
