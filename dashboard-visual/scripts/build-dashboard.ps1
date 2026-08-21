@@ -780,7 +780,7 @@ document.querySelectorAll('.copy-btn[data-cmd]').forEach(function (btn) {
       fallback();
     }
     var original = btn.textContent;
-    btn.textContent = 'Copiado!';
+    btn.textContent = 'Abrindo...';
     setTimeout(function () { btn.textContent = original; }, 1500);
   });
 });
@@ -1774,7 +1774,7 @@ document.querySelectorAll('.copy-btn[data-cmd]').forEach(function (btn) {
       fallback();
     }
     var original = btn.textContent;
-    btn.textContent = 'Copiado!';
+    btn.textContent = 'Abrindo...';
     setTimeout(function () { btn.textContent = original; }, 1500);
   });
 });
@@ -1809,7 +1809,7 @@ if (quickBtn) {
     } else {
       fallback();
     }
-    quickBtn.textContent = 'Copiado!';
+    quickBtn.textContent = 'Abrindo...';
     setTimeout(function () { quickBtn.textContent = quickBtnOriginal; }, 1500);
   });
 }
