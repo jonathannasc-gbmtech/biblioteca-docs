@@ -47,26 +47,95 @@ $archiveIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stro
 $pendIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.3"/><path d="M5.5 8l1.8 1.8L10.8 6"/></svg>'
 $searchIcon = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>'
 
+# Icones do "tipo de repo" do PR (backend/frontend/migration) - trocam o
+# $githubIcon generico no pill de PR, inferido do nome do repo na propria
+# URL (convencao GBM: sufixo -backend, prefixo mfe-/mobile-, ou
+# gbm-app-migrations). "PR #N" no texto ja diz que e' PR - o icone generico
+# do github era redundante; agora carrega informacao nova.
+$backendIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="4.5" rx="1"/><rect x="2" y="9.5" width="12" height="4.5" rx="1"/><circle cx="4.3" cy="4.25" r="0.55" fill="currentColor" stroke="none"/><circle cx="4.3" cy="11.75" r="0.55" fill="currentColor" stroke="none"/></svg>'
+$frontendIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M6 14.5h4M8 11.5v3"/></svg>'
+$migrationIcon = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5h9.5m0 0L10 3M12.5 5.5L10 8"/><path d="M13 10.5H3.5m0 0L6 8M3.5 10.5L6 13"/></svg>'
+
+# Classifica o PR pelo nome do repo na propria URL - sem depender de campo
+# novo no frontmatter. Fallback pro icone generico do github se o nome nao
+# bater com nenhuma convencao conhecida (repo pessoal, nome atipico etc.).
+function Get-PrKindInfo([string]$prUrl) {
+    if ($prUrl -notmatch 'github\.com/[^/]+/([^/]+)/pull/') {
+        return [PSCustomObject]@{ Icon = $githubIcon; Title = 'PR'; Layer = $null }
+    }
+    $repo = $Matches[1]
+    if ($repo -match '-backend$') { return [PSCustomObject]@{ Icon = $backendIcon; Title = 'PR de backend'; Layer = 'backend' } }
+    if ($repo -match 'migrations') { return [PSCustomObject]@{ Icon = $migrationIcon; Title = 'PR de migration'; Layer = 'migrations' } }
+    if ($repo -match '^(gbm-)?(mfe|mobile)-') { return [PSCustomObject]@{ Icon = $frontendIcon; Title = 'PR de frontend'; Layer = 'frontend' } }
+    return [PSCustomObject]@{ Icon = $githubIcon; Title = 'PR'; Layer = $null }
+}
+
+# 4 badges de status por camada (migrations/backend/frontend/testes) da
+# task inteira (todos os repos, via $cardsByTask/$cardsByCluster - mesmo
+# agrupamento cross-repo do Get-RelatedTasksHtml) - substitui a antiga
+# lista de texto livre "Pendencias" (extraida por regex do corpo do doc,
+# pouco legivel e nao confiavel). Verde = feito, vermelho = pendente,
+# amarelo = camada nao existe nesta task (nenhum PR/doc encontrado).
+function Get-LayerStatusHtml([PSCustomObject]$card) {
+    $siblings = if ($card.Task -match '^\d+$') {
+        @($cardsByTask[$card.Task])
+    } elseif ($card.Cluster) {
+        @($cardsByCluster[$card.Cluster])
+    } else {
+        @()
+    }
+    if ($siblings.Count -eq 0) { $siblings = @($card) }
+
+    $allPrs = New-Object System.Collections.Generic.List[string]
+    $allDocs = New-Object System.Collections.Generic.List[object]
+    foreach ($s in $siblings) {
+        foreach ($pr in $s.Signals.PRs) { if (-not $allPrs.Contains($pr)) { $allPrs.Add($pr) } }
+        foreach ($d in $s.Docs) { $allDocs.Add($d) }
+        if ($s.ResumoDoc) { $allDocs.Add($s.ResumoDoc) }
+    }
+
+    function Get-PrState([string]$pr) {
+        # mesma checagem de estado do Get-ExtLinksHtml (Contains, nao -eq,
+        # pra bater com campo com varias URLs - migration espelho etc.)
+        if (@($allDocs | Where-Object { $_.PrMerged -and $_.PrMerged.Contains($pr) }).Count -gt 0) { return 'done' }
+        if (@($allDocs | Where-Object { $_.PrRejected -and $_.PrRejected.Contains($pr) }).Count -gt 0) { return 'done' }
+        return 'pending'
+    }
+
+    function Get-LayerState([string]$layer) {
+        $prsInLayer = @($allPrs | Where-Object { (Get-PrKindInfo $_).Layer -eq $layer })
+        if ($prsInLayer.Count -eq 0) { return 'na' }
+        if (@($prsInLayer | Where-Object { (Get-PrState $_) -eq 'pending' }).Count -gt 0) { return 'pending' }
+        return 'done'
+    }
+
+    $testesDocs = @($allDocs | Where-Object { $_.Type -eq 'testes' })
+    $testState = if ($testesDocs.Count -eq 0) { 'na' }
+                 elseif (@($testesDocs | Where-Object { $_.Status -ne 'completed' }).Count -gt 0) { 'pending' }
+                 else { 'done' }
+
+    $layers = @(
+        @{ Label = 'Migrations'; State = (Get-LayerState 'migrations') }
+        @{ Label = 'Backend'; State = (Get-LayerState 'backend') }
+        @{ Label = 'Frontend'; State = (Get-LayerState 'frontend') }
+        @{ Label = 'Testes'; State = $testState }
+    )
+    $rows = ($layers | ForEach-Object {
+        $stateLabel = switch ($_.State) { 'done' { 'feito' }; 'pending' { 'pendente' }; default { 'nao necessario' } }
+        "<div class=`"layer-row layer-$($_.State)`"><span class=`"layer-dot`"></span><span class=`"layer-label`">$($_.Label)</span><span class=`"layer-state`">$stateLabel</span></div>"
+    }) -join "`n"
+    return "<div class=`"position layer-status`">$rows</div>"
+}
+
 function Get-Signals($docs) {
     $prLinks = New-Object System.Collections.Generic.List[string]
-    $pend = New-Object System.Collections.Generic.List[string]
     foreach ($d in $docs) {
         foreach ($m in [regex]::Matches($d.Body, 'https?://github\.com/\S*?/pull/\d+')) {
             if (-not $prLinks.Contains($m.Value)) { $prLinks.Add($m.Value) }
         }
-        foreach ($line in ($d.Body -split "`r?`n")) {
-            $t = $line.Trim()
-            if (-not $t -or $t -match '^#{1,6}\s') { continue }
-            if ($t -match '(?i)aguardando|bloqueio|pendente|\[confirmar\]|\[bloqueio\]') {
-                $clean = $t -replace '^[-*]\s*', ''
-                if ($clean.Length -gt 160) { $clean = $clean.Substring(0, 160) + '...' }
-                if (-not $pend.Contains($clean)) { $pend.Add($clean) }
-            }
-        }
     }
     return [PSCustomObject]@{
-        PRs        = @($prLinks | Select-Object -First 5)
-        Pendencies = @($pend | Select-Object -First 5)
+        PRs = @($prLinks | Select-Object -First 10)
     }
 }
 
@@ -90,7 +159,7 @@ function Get-CardCommands([PSCustomObject]$card) {
     $cmds = New-Object System.Collections.Generic.List[PSCustomObject]
     if ($card.Active) {
         $cmd = "powershell -NoProfile -Command `"$base; claude 'retomar task $($card.Task) no repo $($card.Repo)'`""
-        $cmds.Add([PSCustomObject]@{ Label = 'Copiar comando'; Class = 'copy-btn'; Cmd = $cmd; Uri = Get-LaunchUri $cmd })
+        $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = Get-LaunchUri $cmd })
     }
     $qaCmd = "powershell -NoProfile -Command `"$base; claude 'ajustar qa task $($card.Task) no repo $($card.Repo)'`""
     $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = Get-LaunchUri $qaCmd })
@@ -126,7 +195,8 @@ function Get-ExtLinksHtml([PSCustomObject]$card) {
         } elseif (@($cardDocsForState | Where-Object { $_.PrPending -and $_.PrPending.Contains($pr) }).Count -gt 0) {
             $stateClass = ' ext-github-open'; $stateTitle = 'PR aberto, aguardando merge'
         }
-        $extLinks.Add("<a class=`"ext-link ext-github$stateClass`" href=`"$(Esc $pr)`" target=`"_blank`" title=`"$stateTitle`">$githubIcon PR #$num</a>")
+        $kind = Get-PrKindInfo $pr
+        $extLinks.Add("<a class=`"ext-link ext-github$stateClass`" href=`"$(Esc $pr)`" target=`"_blank`" title=`"$($kind.Title) - $stateTitle`">$($kind.Icon) PR #$num</a>")
     }
     if ($extLinks.Count -eq 0) { return '' }
     return "<div class=`"ext-links`">$($extLinks -join "`n")</div>"
@@ -179,6 +249,7 @@ foreach ($f in $files) {
         Type     = Clean-Field $p.Meta['type']
         Status   = $status
         Updated  = Clean-Field $p.Meta['updated']
+        UpdatedTime = $f.LastWriteTime.ToString('HH:mm')
         Path     = $f.FullName
         Body     = $p.Body
         Related  = $p.Meta['related']
@@ -374,9 +445,11 @@ foreach ($g in $groups) {
     if ($docs.Count -eq 0 -and $resumoDoc) { $docs = @($resumoDoc) }
     $rep = $docs | Select-Object -First 1
     $isActive = @($docs | Where-Object { $_.Status -in $activeStatuses }).Count -gt 0
-    $latest = ($docs | Where-Object { $_.Updated } | Sort-Object Updated -Descending | Select-Object -First 1).Updated
-    # PR e Azure precisam aparecer em Ativas E Completas - so as pendencias
-    # (texto de "aguardando/bloqueio") ficam restritas a tasks ativas na hora de exibir.
+    $latestDoc = ($docs | Where-Object { $_.Updated } | Sort-Object Updated -Descending | Select-Object -First 1)
+    $latest = $latestDoc.Updated
+    $latestTime = $latestDoc.UpdatedTime
+    # PR e Azure precisam aparecer em Ativas E Completas - so o status por
+    # camada (Get-LayerStatusHtml) fica restrito a tasks ativas na hora de exibir.
     $signals = Get-Signals $docs
     # cluster opcional (so faz diferenca pra task "general" - o card mostra
     # "Geral" por padrao, sem jeito de distinguir varios de cor no dashboard;
@@ -390,11 +463,31 @@ foreach ($g in $groups) {
         Cluster   = $cardCluster
         Active    = $isActive
         Updated   = $latest
+        UpdatedTime = $latestTime
         Docs      = $docs
         Signals   = $signals
         RepPath   = $rep.Path
         ResumoDoc = $resumoDoc
         Branch    = if ($resumoDoc) { $resumoDoc.Branch } else { '' }
+    }
+}
+
+# Related tasks (cross-repo): mesma task numerica, ou mesmo cluster exato
+# (so' task "general"), aparecendo em outro card/repo. Usado na pagina de
+# resumo (Get-RelatedTasksHtml) e no status por camada do card
+# (Get-LayerStatusHtml, precisa vir antes de Build-Card ser chamado mais
+# abaixo). As duas listas sao mutuamente exclusivas por construcao (Task
+# numerica cai so' aqui, "general"+Cluster cai so' ali) - nunca precisa
+# deduplicar um card que bateria nos dois.
+$cardsByTask = @{}
+$cardsByCluster = @{}
+foreach ($c in $cards) {
+    if ($c.Task -match '^\d+$') {
+        if (-not $cardsByTask.ContainsKey($c.Task)) { $cardsByTask[$c.Task] = @() }
+        $cardsByTask[$c.Task] += $c
+    } elseif ($c.Cluster) {
+        if (-not $cardsByCluster.ContainsKey($c.Cluster)) { $cardsByCluster[$c.Cluster] = @() }
+        $cardsByCluster[$c.Cluster] += $c
     }
 }
 
@@ -629,13 +722,13 @@ function Build-Card([PSCustomObject]$card) {
         "<a class=`"$chipClass`" href=`"$fileUri`" target=`"_blank`" title=`"$(Esc $statusLabel)`">$(Esc $typeLabel) $emoji</a>"
     }) -join "`n"
 
-    $updatedHtml = if ($card.Updated) { "<span class=`"updated`">Atualizado $(Esc $card.Updated)</span>" } else { '' }
+    # Hora fica num <span> proprio (.updated-time) - CSS decide quando mostra:
+    # sempre visivel em Ativas (#grid-active), so' com o card expandido em
+    # Completas (.card.expanded), pra nao poluir a grade compacta por padrao.
+    $timeHtml = if ($card.UpdatedTime) { " <span class=`"updated-time`">$(Esc $card.UpdatedTime)</span>" } else { '' }
+    $updatedHtml = if ($card.Updated) { "<span class=`"updated`">Atualizado $(Esc $card.Updated)$timeHtml</span>" } else { '' }
 
-    $posHtml = ''
-    if ($card.Active -and @($card.Signals.Pendencies).Count -gt 0) {
-        $pendItems = ($card.Signals.Pendencies | ForEach-Object { "<li>$(Esc $_)</li>" }) -join "`n"
-        $posHtml = "<div class=`"position`"><div class=`"sig-group`"><span class=`"sig-label`">Pendencias</span><ul class=`"sig-list`">$pendItems</ul></div></div>"
-    }
+    $posHtml = if ($card.Active) { Get-LayerStatusHtml $card } else { '' }
 
     # Links externos (Azure DevOps + PR do GitHub) - aparecem em Ativas E
     # Completas, sempre visiveis mesmo com o card fechado - e' o dado mais
@@ -810,8 +903,15 @@ $faviconLink
 </section>
 
 <section>
+  <h2>Status por camada (caixa "Pendencias" do card ativo)</h2>
+  <div class="swatch-row"><div class="layer-row layer-done"><span class="layer-dot"></span><span class="layer-label">Backend</span><span class="layer-state">feito</span></div><code>.layer-done</code></div>
+  <div class="swatch-row"><div class="layer-row layer-pending"><span class="layer-dot"></span><span class="layer-label">Frontend</span><span class="layer-state">pendente</span></div><code>.layer-pending</code></div>
+  <div class="swatch-row"><div class="layer-row layer-na"><span class="layer-dot"></span><span class="layer-label">Migrations</span><span class="layer-state">nao necessario</span></div><code>.layer-na</code></div>
+</section>
+
+<section>
   <h2>Botoes de acao</h2>
-  <div class="swatch-row"><button class="copy-btn">Copiar comando</button><code>.copy-btn</code></div>
+  <div class="swatch-row"><button class="copy-btn">Retomar task</button><code>.copy-btn</code></div>
   <div class="swatch-row"><button class="copy-btn qa-btn">Reabrir p/ QA</button><code>.copy-btn.qa-btn</code></div>
 </section>
 
@@ -821,6 +921,9 @@ $faviconLink
   <div class="swatch-row"><span class="icon-sample current">$starIcon Estrela (favorita/atual)</span><code>.card-current .star-icon</code></div>
   <div class="swatch-row"><span class="icon-sample">$bookIcon Ver resumo</span><code>.resumo-btn</code></div>
   <div class="swatch-row"><span class="icon-sample">$chevronIcon Expandir/recolher card</span><code>.expand-btn</code></div>
+  <div class="swatch-row"><span class="icon-sample">$backendIcon PR de backend (repo termina em -backend)</span><code>Get-PrKindInfo</code></div>
+  <div class="swatch-row"><span class="icon-sample">$frontendIcon PR de frontend (repo mfe-/mobile-)</span><code>Get-PrKindInfo</code></div>
+  <div class="swatch-row"><span class="icon-sample">$migrationIcon PR de migration (gbm-app-migrations)</span><code>Get-PrKindInfo</code></div>
 </section>
 
 <section>
@@ -1512,6 +1615,10 @@ $faviconLink
   .card.expanded .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .card.expanded .position { display: flex; }
   .card.expanded .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* Hora do "Atualizado": sempre visivel em Ativas, so' ao expandir em
+     Completas - card fechado mostra so a data, sem poluir a grade. */
+  .updated-time { display: none; }
+  #grid-active .updated-time, .card.expanded .updated-time { display: inline; }
   .chip {
     font-size: 0.72rem; padding: 3px 9px; border-radius: 999px; text-decoration: none;
     border: 1px solid transparent; white-space: nowrap;
@@ -1523,9 +1630,19 @@ $faviconLink
   .chip-handover-tecnico { background: #2e1f28; color: #c184a0; border-color: #5c3a4f; }
   .chip-rules { background: #292420; color: #a89484; border-color: #4d413a; }
   .position { background: #202225; border: 1px solid #303338; border-radius: 8px; padding: 8px 10px; flex-direction: column; gap: 6px; }
-  .sig-label { font-size: 0.64rem; text-transform: uppercase; color: var(--text-faint); letter-spacing: 0.06em; }
-  .sig-list { list-style: none; margin: 3px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-  .sig-list li { font-size: 0.76rem; color: #c2c4c9; }
+  /* Status por camada (migrations/backend/frontend/testes), 1 por linha
+     (empilhado, nao lado a lado) - verde/vermelho/amarelo tipo semaforo,
+     cor propria (nao reaproveita --gold/--current) pra ficar universal. */
+  .layer-row { display: flex; align-items: center; gap: 7px; font-size: 0.78rem; }
+  .layer-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .layer-label { color: #c2c4c9; min-width: 72px; }
+  .layer-state { color: var(--text-faint); font-size: 0.72rem; }
+  .layer-done .layer-dot { background: #22c55e; }
+  .layer-done .layer-state { color: #4ade80; }
+  .layer-pending .layer-dot { background: #ef4444; }
+  .layer-pending .layer-state { color: #f0908a; }
+  .layer-na .layer-dot { background: #eab308; }
+  .layer-na .layer-state { color: #d9c069; }
   .card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 6px; padding-right: 26px; gap: 8px; flex-wrap: wrap; }
   .updated { font-size: 0.72rem; color: var(--text-faint); }
   .copy-btn {
@@ -1850,7 +1967,14 @@ New-Item -ItemType Directory -Force -Path $legacyDir | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'paleta.html'), (Build-PaletteHtml))
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'archive.html'), (Build-ArchiveHtml))
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'pendencias.html'), (Build-PendenciasHtml))
-[System.IO.File]::WriteAllText((Join-Path $hubRoot 'nova-task.html'), (Build-NovaTaskHtml))
+# nova-task.html e' hand-tuned (CSS/layout ajustado interativamente com o
+# usuario) - so' cria se ainda nao existir (bootstrap), nunca sobrescreve
+# depois (mesmo padrao do historico-nova-task.md abaixo). Sobrescrever
+# sempre ja apagou ajustes de layout reais numa sessao anterior.
+$novaTaskPath = Join-Path $hubRoot 'nova-task.html'
+if (-not (Test-Path $novaTaskPath)) {
+    [System.IO.File]::WriteAllText($novaTaskPath, (Build-NovaTaskHtml))
+}
 
 # Historico de criacao de tasks (o proprio agente anexa as entradas,
 # seguindo a instrucao embutida no prompt de nova-task.html - sem skill
@@ -1860,23 +1984,6 @@ New-Item -ItemType Directory -Force -Path $legacyDir | Out-Null
 $historicoPath = Join-Path $hubRoot 'historico-nova-task.md'
 if (-not (Test-Path $historicoPath)) {
     [System.IO.File]::WriteAllText($historicoPath, "# Historico de criacao de tasks`n`nEntradas anexadas pelo agente (instrucao embutida no prompt de nova-task.html) a cada task criada - append-only, nao editar a mao.`n")
-}
-
-# Related tasks (cross-repo): mesma task numerica, ou mesmo cluster exato
-# (so' task "general"), aparecendo em outro card/repo. So' usado na pagina
-# de resumo (Get-RelatedTasksHtml). As duas listas sao mutuamente exclusivas
-# por construcao (Task numerica cai so' aqui, "general"+Cluster cai so' ali)
-# - nunca precisa deduplicar um card que bateria nos dois.
-$cardsByTask = @{}
-$cardsByCluster = @{}
-foreach ($c in $cards) {
-    if ($c.Task -match '^\d+$') {
-        if (-not $cardsByTask.ContainsKey($c.Task)) { $cardsByTask[$c.Task] = @() }
-        $cardsByTask[$c.Task] += $c
-    } elseif ($c.Cluster) {
-        if (-not $cardsByCluster.ContainsKey($c.Cluster)) { $cardsByCluster[$c.Cluster] = @() }
-        $cardsByCluster[$c.Cluster] += $c
-    }
 }
 
 # Paginas de resumo standalone - uma por task+repo que tem doc `resumo`

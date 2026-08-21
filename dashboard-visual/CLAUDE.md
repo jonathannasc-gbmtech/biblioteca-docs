@@ -40,7 +40,7 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   QA** — cenário: task já concluída/mergeada, retorno do QA chegou depois;
   o botão copia um comando que reativa o repositório (branch) sem reabrir
   o status da task na Biblioteca (ver `task-hub-qa` abaixo). Tasks ativas
-  ganham mais um botão — **Copiar comando** (retomar). Não existe botão de
+  ganham mais um botão — **Retomar task**. Não existe botão de
   "marcar concluída": o sweep de `pr_pending` (checa estado real do PR via
   `gh`) fecha a task sozinho quando o PR mergeia — um botão manual ficaria
   redundante. Comandos vêm de `Get-CardCommands` em `build-dashboard.ps1`,
@@ -82,7 +82,7 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   mesmo estilo visual das outras seções) reúne as pills de links externos
   (Azure + PR, coloridas por estado — mesma função compartilhada
   `Get-ExtLinksHtml` do dashboard, não mais isoladas ao lado do título) e
-  os botões de ação (Copiar comando quando ativa, Ajustes QA sempre). Uma
+  os botões de ação (Retomar task quando ativa, Ajustes QA sempre). Uma
   seção **Testes** só
   aparece se houver algum doc `testes` com `status: completed` pra essa
   task+repo — link direto pro arquivo, sem detalhe de resultado, só "foi
@@ -112,7 +112,7 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   resumo, ao lado do repo — só lá, não no card compacto do dashboard
   (decisão explícita: manter o card enxuto).
 - **Lançamento automático via protocolo `biblioteca-cmd:`** — cada botão
-  de ação (`Copiar comando`, `Reabrir p/ QA`, e os novos "Nova Task"/"Abrir
+  de ação (`Retomar task`, `Reabrir p/ QA`, e os novos "Nova Task"/"Abrir
   Claude") é um `<a href="biblioteca-cmd:<comando url-encoded>">` além de
   copiar pro clipboard (comportamento antigo, mantido como fallback). Um
   dois protocolos customizados registrados uma vez por máquina via
@@ -226,7 +226,7 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
 
 **Caminho principal:** abrir `dashboard.html` (favoritado no navegador) →
 buscar/achar a task → expandir o card (seta no canto inferior direito) →
-clicar "Copiar comando" ou "Ajustes QA" (ou abrir a
+clicar "Retomar task" ou "Ajustes QA" (ou abrir a
 caixa de ações na página de resumo) → um `cmd` novo abre com o comando já
 digitado (protocolo `biblioteca-cmd:`, se registrado) ou o texto já está no
 clipboard pra colar (fallback) → apertar Enter é sempre manual. Cada

@@ -120,9 +120,10 @@ já roda a primeira sincronização — o dashboard abre pronto pra uso.
 - **Abrir o dashboard** — `dashboard-visual/dashboard.html`, salvo nos
   favoritos do navegador. É o ponto de entrada de todo dia — busca, retoma,
   vê o que falta.
-- **Retomar/concluir/reabrir uma task** — clique em "Copiar comando" ou
-  "Reabrir p/ QA" no card (ou na página de resumo), cole num terminal e dê
-  enter. O comando já sabe a task e o repo — a skill certa
+- **Retomar/concluir/reabrir uma task** — clique em "Retomar task" ou
+  "Reabrir p/ QA" no card (ou na página de resumo) — abre um terminal já
+  com o comando digitado (ou copia pro clipboard, se o protocolo não
+  estiver registrado). O comando já sabe a task e o repo — a skill certa
   (`task-hub-resume`/`task-hub-qa`) assume a partir daí.
 
 ## Detalhes técnicos
