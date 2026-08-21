@@ -73,13 +73,27 @@ function Get-Signals($docs) {
 # Comandos copiaveis de um card - usado tanto pelos botoes inline do card
 # quanto pela caixa de acoes da pagina de resumo, pra nao duplicar as
 # strings de comando em dois lugares.
+# Prefixo do protocolo customizado registrado por register-protocol.ps1 -
+# um link biblioteca-cmd:<comando url-encoded> abre um cmd novo com o
+# comando ja digitado (launch-command.vbs), sem apertar Enter. Some sem
+# erro em navegador/maquina sem o protocolo registrado - so o clipboard
+# (fallback de sempre) continua funcionando.
+function Get-LaunchUri([string]$cmdText) {
+    return 'biblioteca-cmd:' + [Uri]::EscapeDataString($cmdText)
+}
+
 function Get-CardCommands([PSCustomObject]$card) {
-    $base = "cd `"$hubRoot`""
+    # Envolvido em "powershell -NoProfile -Command" pra funcionar colado tanto
+    # no cmd.exe (onde ; nao separa comandos, quebrava o cd) quanto no
+    # PowerShell - independe do shell padrao do usuario.
+    $base = "cd '$hubRoot'"
     $cmds = New-Object System.Collections.Generic.List[PSCustomObject]
     if ($card.Active) {
-        $cmds.Add([PSCustomObject]@{ Label = 'Copiar comando'; Class = 'copy-btn'; Cmd = "$base; claude `"retomar task $($card.Task) no repo $($card.Repo)`"" })
+        $cmd = "powershell -NoProfile -Command `"$base; claude 'retomar task $($card.Task) no repo $($card.Repo)'`""
+        $cmds.Add([PSCustomObject]@{ Label = 'Copiar comando'; Class = 'copy-btn'; Cmd = $cmd; Uri = Get-LaunchUri $cmd })
     }
-    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = "$base; claude `"ajustar qa task $($card.Task) no repo $($card.Repo)`"" })
+    $qaCmd = "powershell -NoProfile -Command `"$base; claude 'ajustar qa task $($card.Task) no repo $($card.Repo)'`""
+    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = Get-LaunchUri $qaCmd })
     return $cmds
 }
 
@@ -99,13 +113,17 @@ function Get-ExtLinksHtml([PSCustomObject]$card) {
         # fechado sem merge=vermelho) - olha o frontmatter dos docs do card,
         # cai pra neutro (cinza, comportamento antigo) se nenhum tiver o estado
         # desse link ainda (sweep/backfill em build-dashboard.ps1 preenche isso).
+        # Contains, nao -eq: tasks tipo "migration espelho" (3 ambientes, 3 PRs)
+        # guardam varias URLs no mesmo campo pr_merged/pr_pending/pr_rejected
+        # (uma lista simples, sem virar YAML multi-linha) - -eq so bateria com
+        # a primeira URL do campo.
         $stateClass = ''
         $stateTitle = 'Abrir PR no GitHub'
-        if (@($cardDocsForState | Where-Object { $_.PrMerged -eq $pr }).Count -gt 0) {
+        if (@($cardDocsForState | Where-Object { $_.PrMerged -and $_.PrMerged.Contains($pr) }).Count -gt 0) {
             $stateClass = ' ext-github-merged'; $stateTitle = 'PR mergeado'
-        } elseif (@($cardDocsForState | Where-Object { $_.PrRejected -eq $pr }).Count -gt 0) {
+        } elseif (@($cardDocsForState | Where-Object { $_.PrRejected -and $_.PrRejected.Contains($pr) }).Count -gt 0) {
             $stateClass = ' ext-github-rejected'; $stateTitle = 'PR fechado sem merge'
-        } elseif (@($cardDocsForState | Where-Object { $_.PrPending -eq $pr }).Count -gt 0) {
+        } elseif (@($cardDocsForState | Where-Object { $_.PrPending -and $_.PrPending.Contains($pr) }).Count -gt 0) {
             $stateClass = ' ext-github-open'; $stateTitle = 'PR aberto, aguardando merge'
         }
         $extLinks.Add("<a class=`"ext-link ext-github$stateClass`" href=`"$(Esc $pr)`" target=`"_blank`" title=`"$stateTitle`">$githubIcon PR #$num</a>")
@@ -164,12 +182,63 @@ foreach ($f in $files) {
         Path     = $f.FullName
         Body     = $p.Body
         Related  = $p.Meta['related']
+        Branch    = Clean-Field $p.Meta['branch']
         Cluster   = Clean-Field $p.Meta['cluster']
         PrPending  = Clean-Field $p.Meta['pr_pending']
         PrMerged   = Clean-Field $p.Meta['pr_merged']
         PrRejected = Clean-Field $p.Meta['pr_rejected']
     }
 }
+
+# Lista de repos conhecidos - repos ja com doc na Biblioteca + pastas reais em
+# reposBasePath (repo novo que ainda nao tem task nenhuma). Usada nos
+# datalists de nova-task.html e do seletor "Abrir Claude" do header do
+# dashboard - montada 1x aqui pra nao duplicar a logica nos dois lugares.
+$knownRepos = New-Object System.Collections.Generic.List[string]
+foreach ($r in @($all | ForEach-Object { $_.Repo } | Where-Object { $_ })) {
+    if (-not $knownRepos.Contains($r)) { $knownRepos.Add($r) }
+}
+if ($bibConfig.reposBasePath -and (Test-Path $bibConfig.reposBasePath)) {
+    foreach ($dir in (Get-ChildItem -Path $bibConfig.reposBasePath -Directory -ErrorAction SilentlyContinue)) {
+        if (-not $knownRepos.Contains($dir.Name)) { $knownRepos.Add($dir.Name) }
+    }
+}
+
+# Ordenacao logica (nao alfabetica pura): backend + frontend/mfe/mobile do
+# mesmo dominio ficam juntos (settings-backend do lado de mfe-settings),
+# dominios sem par (migrations, geral) ficam depois dos pares, e repos de
+# skills pessoais (nao-projeto) sempre por ultimo. Descarta entradas
+# malformadas (valor com virgula/espaco vindo de frontmatter com 2 repos
+# no mesmo campo por engano - nao e' pasta de verdade).
+$domainAliases = @{ 'schedule' = 'scheduling' }
+$domainRank = @{ 'backoffice' = 0; 'collector' = 1; 'railroad' = 2; 'road' = 3; 'scheduling' = 4; 'settings' = 5; 'stock' = 6 }
+$personalRepos = @('gbm-ai-skills', 'jow-ai-skills', 'ponytail')
+
+function Get-RepoSortKey([string]$repo) {
+    if ($personalRepos -contains $repo.ToLowerInvariant()) {
+        return [PSCustomObject]@{ Bucket = 2; DomainRank = 99; Domain = ''; SubOrder = 0; Name = $repo }
+    }
+    $domain = $null
+    $subOrder = 3
+    if ($repo -match '^gbm-app-(.+)-backend$') { $domain = $Matches[1]; $subOrder = 0 }
+    elseif ($repo -match '^gbm-mfe-(.+)$') {
+        $raw = $Matches[1]
+        $domain = if ($domainAliases.ContainsKey($raw)) { $domainAliases[$raw] } else { $raw }
+        $subOrder = 1
+    } elseif ($repo -match '^gbm-mobile-(.+)$') { $domain = $Matches[1]; $subOrder = 2 }
+
+    if ($domain) {
+        $rank = if ($domainRank.ContainsKey($domain)) { $domainRank[$domain] } else { 50 }
+        return [PSCustomObject]@{ Bucket = 0; DomainRank = $rank; Domain = $domain; SubOrder = $subOrder; Name = $repo }
+    }
+    return [PSCustomObject]@{ Bucket = 1; DomainRank = 0; Domain = ''; SubOrder = 0; Name = $repo }
+}
+
+$knownRepos = @($knownRepos | Where-Object { $_ -match '^[A-Za-z0-9._-]+$' } |
+    ForEach-Object { Get-RepoSortKey $_ } |
+    Sort-Object Bucket, DomainRank, Domain, SubOrder, Name |
+    ForEach-Object { $_.Name })
+$knownReposOptionsHtml = ($knownRepos | ForEach-Object { "<option value=`"$(Esc $_)`">" }) -join "`n"
 
 # Regex de link de PR no corpo - mesma usada pelo Get-Signals (linha ~38),
 # reaproveitada aqui pro backfill de estado (cor do pill).
@@ -325,6 +394,7 @@ foreach ($g in $groups) {
         Signals   = $signals
         RepPath   = $rep.Path
         ResumoDoc = $resumoDoc
+        Branch    = if ($resumoDoc) { $resumoDoc.Branch } else { '' }
     }
 }
 
@@ -421,7 +491,7 @@ function Build-SummaryHtml([PSCustomObject]$card) {
     $relatedTasksHtml = Get-RelatedTasksHtml $card
     $sideHtml = "$sideHtml`n$testesHtml`n$relatedTasksHtml`n$relatedHtml"
 
-    $actionsHtml = (Get-CardCommands $card | ForEach-Object { "<button class=`"$($_.Class)`" data-cmd=`"$(Esc $_.Cmd)`">$(Esc $_.Label)</button>" }) -join "`n"
+    $actionsHtml = (Get-CardCommands $card | ForEach-Object { "<a class=`"$($_.Class)`" href=`"$(Esc $_.Uri)`" data-cmd=`"$(Esc $_.Cmd)`">$(Esc $_.Label)</a>" }) -join "`n"
 
     return @"
 <!doctype html>
@@ -450,6 +520,8 @@ $faviconLink
   .head-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
   h1 { font-size: 1.25rem; margin: 0; color: #fff; }
   .repo { font-family: ui-monospace, "SF Mono", monospace; color: var(--gold-bright); font-size: 0.85rem; }
+  .branch { font-family: ui-monospace, "SF Mono", monospace; color: var(--text-dim); font-size: 0.8rem; }
+  .branch::before { content: "\1F500  "; }
   .ext-link {
     display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 500;
     padding: 4px 10px; border-radius: 999px; text-decoration: none;
@@ -465,6 +537,7 @@ $faviconLink
   .copy-btn {
     background: var(--gold-bg); color: var(--text); border: 1px solid var(--gold-border); border-radius: 6px;
     padding: 6px 10px; font-size: 0.78rem; cursor: pointer; text-align: left;
+    display: inline-block; text-decoration: none;
   }
   .copy-btn:hover { filter: brightness(1.2); }
   .qa-btn { border-color: #6b3f34; }
@@ -511,6 +584,7 @@ $faviconLink
 <div class="head-row">
   <h1>Resumo $($script:EmDash) $(Esc $taskLabel)</h1>
   <span class="repo">$(Esc $card.Repo)</span>
+  $(if ($card.Branch) { "<span class=`"branch`">$(Esc $card.Branch)</span>" } else { '' })
 </div>
 <div class="resumo-section actions-box">$extLinksHtml$actionsHtml</div>
 <div class="summary-grid">
@@ -576,15 +650,16 @@ function Build-Card([PSCustomObject]$card) {
         $resumoBtnHtml = "<a class=`"icon-btn resumo-btn`" href=`"summaries/$summaryFile`" title=`"Ver resumo`" aria-label=`"Ver resumo`">$bookIcon</a>"
     }
 
-    $btns = (Get-CardCommands $card | ForEach-Object { "<button class=`"$($_.Class)`" data-cmd=`"$(Esc $_.Cmd)`">$(Esc $_.Label)</button>" }) -join ''
+    $btns = (Get-CardCommands $card | ForEach-Object { "<a class=`"$($_.Class)`" href=`"$(Esc $_.Uri)`" data-cmd=`"$(Esc $_.Cmd)`">$(Esc $_.Label)</a>" }) -join ''
     $btnsHtml = "<div class=`"btns`">$btns</div>"
 
     $taskLabel = if ($card.Cluster) { $card.Cluster } elseif ($card.Task -eq 'general') { 'Geral' } else { "Task $($card.Task)" }
     $searchBlob = Esc(("$taskLabel $($card.Repo) $($card.Function)").ToLowerInvariant())
+    $repoLower = Esc(($card.Repo).ToLowerInvariant())
     $cardId = Esc($card.RepPath)
 
     return @"
-<div class="card" data-search="$searchBlob" data-id="$cardId">
+<div class="card" data-search="$searchBlob" data-repo="$repoLower" data-id="$cardId">
   <div class="card-head">
     <div class="card-head-left">
       <span class="task-id" title="$(Esc $taskLabel)">$(Esc $taskLabel)</span>
@@ -873,6 +948,273 @@ if (archiveSearch) {
 "@
 }
 
+# Formulario de criacao de task - dump completo (nao pergunta parcial por
+# chat): usuario preenche link(s) do Azure, repo e a demanda em texto livre,
+# a pagina monta um comando que abre o Claude DIRETO na pasta do repo
+# escolhido, com um prompt auto-suficiente (sem skill dedicada - o texto
+# ja inclui as instrucoes de busca/confirmacao/historico, e o gate global
+# do CLAUDE.md do usuario dispara sozinho, igual qualquer demanda digitada
+# nesse repo). Estatica (sem backend) - so compoe o texto, quem processa
+# e' o agente depois que a sessao abre. Reaproveita o mesmo mecanismo de
+# lancamento do biblioteca-cmd: (Get-LaunchUri) + copia pro clipboard como
+# fallback, igual todo outro botao de acao.
+function Build-NovaTaskHtml() {
+    # $reposBasePathJs vem do escopo do script (calculado antes desta funcao
+    # ser chamada, perto do fim do arquivo) - mesmo padrao de closure que as
+    # outras Build-*Html usam pra $hubRoot/$faviconLink etc.
+    $hubRootJs = $hubRoot.Replace('\', '\\')
+
+    return @"
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+$faviconLink
+<title>Biblioteca - Nova Task</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #1c1e21; --card-bg: #24262a; --card-border: #34373c;
+    --text: #e2e4e7; --text-dim: #93969e; --text-faint: #6d7078;
+    --gold: #b8935a; --gold-bright: #d9b26a; --gold-bg: #2e2717; --gold-border: #6b5628;
+    --azure-bg: #1f2a33; --azure-text: #7fa8c2; --azure-border: #3d5566;
+    --claude-bg: #2e1f16; --claude-border: #a85a35; --claude-bright: #d97757;
+  }
+  * { box-sizing: border-box; }
+  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text); max-width: 1400px;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0 auto; padding: 20px 32px 24px; display: flex; flex-direction: column;
+  }
+  .back { color: var(--text-dim); text-decoration: none; font-size: 0.82rem; flex-shrink: 0; }
+  .back:hover { color: var(--gold-bright); }
+  h1 { font-size: 1.3rem; margin: 10px 0 4px; color: #fff; flex-shrink: 0; }
+  .sub { color: var(--text-faint); font-size: 0.85rem; margin: 0 0 16px; flex-shrink: 0; }
+  /* grid-template-rows: minmax(0,1fr) - forca a linha unica a ocupar toda
+     a altura restante do container (que ja e' definida, vem do flex:1 do
+     body) em vez de depender do "auto" calculado a partir do conteudo -
+     "auto" mediu a coluna esquerda mais alta que a direita mesmo crescida,
+     deixando vao vazio antes do botao. */
+  .nt-grid {
+    display: grid; grid-template-columns: 1.1fr 1fr; grid-template-rows: minmax(0, 1fr);
+    gap: 20px; align-items: stretch; flex: 1 1 auto; min-height: 0;
+  }
+  /* height:100% (nao so' o stretch implicito do grid) - sem isso o
+     flex-grow dos filhos (a secao do prompt/demanda) nao enxerga uma
+     altura definida pra crescer contra, e vira um vao vazio embaixo em
+     vez de esticar a caixa. */
+  .nt-col-main, .nt-col-side { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+  .nt-desc-section { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .nt-desc-section textarea { flex: 1 1 auto; min-height: 200px; }
+  .nt-prompt-section { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .nt-prompt-section textarea { flex: 1 1 auto; min-height: 200px; }
+  .nt-col-side .actions { flex-shrink: 0; margin-top: auto; padding-top: 14px; }
+  @media (max-width: 980px) {
+    html, body { height: auto; }
+    body { display: block; }
+    .nt-grid { grid-template-columns: 1fr; }
+    .nt-col-main, .nt-col-side { height: auto; }
+  }
+  .nt-section {
+    background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px;
+    padding: 14px 16px; margin: 0 0 14px;
+  }
+  .nt-section h2 {
+    font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--gold-bright); margin: 0 0 10px; display: flex; align-items: center; gap: 6px;
+  }
+  .nt-azure { border-color: var(--azure-border); }
+  .nt-azure h2 { color: var(--azure-text); }
+  label { display: block; font-size: 0.8rem; color: var(--text-dim); margin: 12px 0 6px; }
+  label:first-of-type { margin-top: 0; }
+  label.req::after { content: " *"; color: var(--gold-bright); }
+  label.nt-optional { font-size: 0.72rem; color: var(--text-faint); }
+  input[type="text"], textarea {
+    width: 100%; background: #262931; border: 1px solid var(--card-border);
+    color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 0.88rem;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; }
+  input[type="text"]:focus-visible, textarea:focus-visible { border-color: var(--gold); }
+  #nt-desc { min-height: 140px; }
+  .hint { color: var(--text-faint); font-size: 0.76rem; margin: 6px 0 0; }
+  .hint code { font-family: ui-monospace, "SF Mono", monospace; color: var(--gold-bright); }
+  .hint a { color: var(--gold-bright); }
+  .warn { color: #c98a7a; font-size: 0.8rem; min-height: 1.1em; margin: 10px 0; }
+  #nt-prompt { min-height: 150px; font-size: 0.85rem; line-height: 1.4; }
+  details { margin-top: 10px; }
+  details summary { color: var(--text-dim); font-size: 0.76rem; cursor: pointer; }
+  details summary:hover { color: var(--gold-bright); }
+  #nt-output {
+    margin-top: 8px; min-height: 80px; font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 0.74rem; color: var(--text-dim);
+  }
+  .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+  .claude-btn {
+    background: var(--claude-bg); color: var(--claude-bright); border: 1px solid var(--claude-border);
+    border-radius: 8px; padding: 10px 20px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    display: inline-block; text-decoration: none;
+  }
+  .claude-btn:hover { filter: brightness(1.2); }
+</style>
+</head>
+<body>
+<a class="back" href="dashboard.html">&larr; Voltar ao dashboard</a>
+<h1>Nova Task</h1>
+<p class="sub">Preenche os campos - o prompt se monta sozinho na caixa ao lado, pode ajustar antes de abrir. "Abrir Claude" ja copia e tenta abrir direto na pasta do repositorio.</p>
+
+<div class="nt-grid">
+  <div class="nt-col-main">
+    <section class="nt-section nt-azure">
+      <h2>$linkIcon Origem (Azure DevOps)</h2>
+      <label class="req" for="nt-azure">Link do work item</label>
+      <input type="text" id="nt-azure" placeholder="https://dev.azure.com/.../_workitems/edit/12345" autocomplete="off">
+      <label class="nt-optional" for="nt-parent">Link do item pai (opcional)</label>
+      <input type="text" id="nt-parent" placeholder="https://dev.azure.com/.../_workitems/edit/12000" autocomplete="off">
+      <p class="hint">Pode deixar em branco - o Claude acha o parent sozinho via MCP do Azure DevOps, se estiver conectado.</p>
+    </section>
+
+    <section class="nt-section">
+      <h2>Repositorio</h2>
+      <label class="req" for="nt-repo">Repositorio</label>
+      <input type="text" id="nt-repo" list="nt-repos" placeholder="meu-app-frontend" autocomplete="off">
+      <datalist id="nt-repos">
+$knownReposOptionsHtml
+      </datalist>
+      <p class="hint" id="nt-path-hint"></p>
+    </section>
+
+    <section class="nt-section nt-desc-section">
+      <h2>Demanda</h2>
+      <label class="req" for="nt-desc">O que precisa ser feito</label>
+      <textarea id="nt-desc" placeholder="Contexto, aceite, qualquer coisa relevante - sem limite de linhas."></textarea>
+    </section>
+  </div>
+
+  <div class="nt-col-side">
+    <section class="nt-section nt-prompt-section">
+      <h2>Prompt (isso vai ser enviado pro Claude)</h2>
+      <textarea id="nt-prompt" placeholder="Preencha os campos ao lado - o prompt aparece aqui sozinho."></textarea>
+      <p class="hint" id="nt-recalc-wrap" style="display:none">Editado manualmente - <a href="#" id="nt-recalc">recalcular a partir dos campos</a></p>
+      <details>
+        <summary>Comando bruto (powershell)</summary>
+        <textarea id="nt-output" readonly placeholder="Aparece depois de clicar em Abrir Claude."></textarea>
+      </details>
+    </section>
+
+    <p class="warn" id="nt-warn"></p>
+    <div class="actions">
+      <a class="claude-btn" id="nt-launch" href="#">Abrir Claude</a>
+    </div>
+  </div>
+</div>
+
+<script>
+var azureEl = document.getElementById('nt-azure');
+var parentEl = document.getElementById('nt-parent');
+var repoEl = document.getElementById('nt-repo');
+var descEl = document.getElementById('nt-desc');
+var promptEl = document.getElementById('nt-prompt');
+var pathHint = document.getElementById('nt-path-hint');
+var recalcWrap = document.getElementById('nt-recalc-wrap');
+var warn = document.getElementById('nt-warn');
+var rawOutput = document.getElementById('nt-output');
+var launch = document.getElementById('nt-launch');
+var manualEdit = false;
+var syncing = false;
+
+// Sem skill dedicada - o prompt e' auto-suficiente: abre direto no repo e
+// usa o fluxo global de skills (gbm-triagem/criar-task-code/plano-acao)
+// que ja dispara sozinho por causa do CLAUDE.md do usuario. As instrucoes
+// de busca/confirmacao/historico vao dentro do proprio texto, nao numa
+// skill separada. Confirmacao do Azure e' objetiva (link + sim/nao), nao
+// um paragrafo aberto - e so acontece 1x, depois o REQ salvo vira a fonte.
+function buildPromptText() {
+  var azure = azureEl.value.trim();
+  var parent = parentEl.value.trim();
+  var repo = repoEl.value.trim();
+  var desc = descEl.value.trim();
+  if (!azure && !repo && !desc) { return ''; }
+  var parts = [];
+  parts.push('Nova demanda - Azure: ' + (azure || '(nao informado)') + (parent ? ' (parent: ' + parent + ')' : '') + '.');
+  parts.push('Repo: ' + (repo || '(nao informado)') + '. Se esta pasta nao for exatamente esse repositorio, mova-se (cd) pra pasta correta antes de seguir.');
+  parts.push('Descricao: ' + (desc || '(nao informado)'));
+  parts.push('Antes de gravar qualquer doc: busque REQ/parent via MCP azure-devops se estiver conectado (ferramenta wit_work_item, `$expand=relations pra achar o parent - nunca wit_work_item_write/wit_work_item_comment_write/wit_work_item_link_write/wit_backlog). Mostre o link do work item (e do parent, se achar) e peca uma confirmacao objetiva (sim/nao) se e esse mesmo - nao descreva tudo em texto solto, so o link + a pergunta.');
+  parts.push('So depois da confirmacao, grave o REQ (e o parent, se houver) em reqs/ na Biblioteca e siga o fluxo normal (gbm-triagem, criar-task-code, plano-acao). A partir dai, use o arquivo salvo como fonte - nao reconsulte o Azure ao vivo de novo pra essa mesma task.');
+  parts.push('Ao terminar de gravar os docs (task-code/reqs/resumo), anexe uma entrada em ' + '$hubRootJs' + '\\historico-nova-task.md (cabecalho \'## {data/hora} - task {id|slug} ({repo})\' + bullets Azure/Parent/REQs confirmados/Docs gerados) antes de considerar concluido.');
+  return parts.join('\n\n');
+}
+
+function updatePathHint() {
+  var repo = repoEl.value.trim();
+  pathHint.textContent = repo ? ('Vai abrir em: ' + '$reposBasePathJs\\' + repo) : '';
+}
+
+function regeneratePrompt() {
+  syncing = true;
+  promptEl.value = buildPromptText();
+  syncing = false;
+  manualEdit = false;
+  recalcWrap.style.display = 'none';
+}
+
+[azureEl, parentEl, repoEl, descEl].forEach(function (el) {
+  el.addEventListener('input', function () {
+    if (!manualEdit) { regeneratePrompt(); }
+    updatePathHint();
+  });
+});
+
+promptEl.addEventListener('input', function () {
+  if (syncing) { return; }
+  manualEdit = true;
+  recalcWrap.style.display = 'block';
+});
+
+document.getElementById('nt-recalc').addEventListener('click', function (e) {
+  e.preventDefault();
+  regeneratePrompt();
+});
+
+launch.addEventListener('click', function (e) {
+  var azure = azureEl.value.trim();
+  var repo = repoEl.value.trim();
+  var desc = descEl.value.trim();
+  if (!azure || !repo || !desc) {
+    e.preventDefault();
+    warn.textContent = 'Preencha ao menos o link do Azure, o repositorio e a descricao.';
+    return;
+  }
+  warn.textContent = '';
+  var promptOneLine = promptEl.value.trim().replace(/\r\n|\r|\n/g, '\\n').replace(/"/g, "'");
+  var escapedPhrase = promptOneLine.replace(/'/g, "''");
+  var cmd = 'powershell -NoProfile -Command "cd \'$reposBasePathJs\\' + repo + '\'; claude \'' + escapedPhrase + '\'"';
+
+  rawOutput.value = cmd;
+  launch.setAttribute('href', 'biblioteca-cmd:' + encodeURIComponent(cmd));
+
+  function fallback() {
+    var ta = document.createElement('textarea');
+    ta.value = cmd;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (err) {}
+    document.body.removeChild(ta);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).catch(fallback);
+  } else {
+    fallback();
+  }
+});
+</script>
+</body>
+</html>
+"@
+}
+
 # Pagina de acao pontual: lista tasks cujo `resumo` ficou pra tras (status
 # draft/in_progress) enquanto o resto da task ja nao esta mais ativo -
 # exatamente o tipo de deriva encontrada manualmente em 2026-08-14
@@ -1010,7 +1352,7 @@ pendBtn.addEventListener('click', function () {
     return c.getAttribute('data-task') + ' (' + c.getAttribute('data-repo') + ')';
   });
   if (!items.length) { return; }
-  var text = 'cd "$hubRootJs"; claude "verificar o estado real de merge/PR e atualizar a documentacao (resumo e status) das tasks pendentes na Biblioteca: ' + items.join(', ') + '"';
+  var text = 'powershell -NoProfile -Command "cd \'$hubRootJs\'; claude \'verificar o estado real de merge/PR e atualizar a documentacao (resumo e status) das tasks pendentes na Biblioteca: ' + items.join(', ') + '\'"';
   function fallback() {
     var ta = document.createElement('textarea');
     ta.value = text;
@@ -1068,6 +1410,9 @@ $faviconLink
     --gold-border: #6b5628;
     --current: #d97b3f;
     --current-glow: rgba(217, 123, 63, 0.28);
+    --claude-bg: #2e1f16;
+    --claude-border: #a85a35;
+    --claude-bright: #d97757;
   }
   * { box-sizing: border-box; }
   *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
@@ -1078,7 +1423,7 @@ $faviconLink
     margin: 0;
     padding: 24px 32px 64px;
   }
-  .top-header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid var(--gold-border); padding-bottom: 16px; margin-bottom: 22px; }
+  .top-header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-bottom: 2px solid var(--gold-border); padding-bottom: 16px; margin-bottom: 22px; }
   .brand-icon { flex-shrink: 0; }
   .brand-icon svg { width: 32px; height: 32px; }
   .palette-link {
@@ -1093,7 +1438,7 @@ $faviconLink
   .stat { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; display: inline-block; }
   .dot-neutral { background: var(--text-faint); }
-  .search-wrap { position: relative; margin-bottom: 28px; max-width: 480px; }
+  .search-wrap { position: relative; margin: 0; max-width: 480px; flex: 1 1 260px; }
   .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-faint); pointer-events: none; display: flex; }
   #search {
     width: 100%; max-width: 480px; background: var(--input-bg); border: 1px solid var(--card-border);
@@ -1186,9 +1531,28 @@ $faviconLink
   .copy-btn {
     background: var(--gold-bg); color: var(--text); border: 1px solid var(--gold-border); border-radius: 6px;
     padding: 5px 10px; font-size: 0.76rem; cursor: pointer;
+    display: inline-block; text-decoration: none;
   }
   .copy-btn:hover { filter: brightness(1.15); }
   .qa-btn { border-color: #6b3f34; }
+  /* Botoes do header (Abrir Claude / + Nova Task) tem escala propria, igual
+     a altura das caixas de busca/repo ao lado - nao reaproveita o padding
+     menor do .copy-btn generico (usado nos botoes de card/resumo). */
+  .top-header .primary-link, .claude-btn {
+    padding: 9px 16px; font-size: 0.85rem; border-radius: 8px;
+  }
+  .primary-link { border-color: var(--gold); font-weight: 600; }
+  .claude-btn {
+    background: var(--claude-bg); color: var(--claude-bright); border: 1px solid var(--claude-border);
+    font-weight: 600; cursor: pointer; display: inline-block; text-decoration: none;
+  }
+  .claude-btn:hover { filter: brightness(1.2); }
+  .quick-open { display: flex; align-items: center; gap: 6px; margin: 0; flex: 0 0 auto; }
+  .quick-open input {
+    background: var(--input-bg); border: 1px solid var(--card-border); color: var(--text);
+    border-radius: 8px; padding: 10px 14px; font-size: 0.9rem; width: 170px;
+  }
+  .quick-open input:focus-visible { border-color: var(--gold); }
   .empty { color: var(--text-faint); font-size: 0.85rem; }
 </style>
 </head>
@@ -1219,6 +1583,41 @@ document.querySelectorAll('.copy-btn[data-cmd]').forEach(function (btn) {
     setTimeout(function () { btn.textContent = original; }, 1500);
   });
 });
+
+// Acesso rapido "Abrir Claude no repo" - o comando depende do repo escolhido
+// no navegador, entao e' montado aqui no clique (nao em build-time como os
+// outros botoes) - mesmo mecanismo biblioteca-cmd:/clipboard, so' calculado
+// tarde. __REPOS_BASE_PATH__ e' substituido por texto literal depois (mesma
+// tecnica do $faviconLink no $head - $foot e' single-quoted, sem interpolar).
+var quickBtn = document.getElementById('quick-open-btn');
+if (quickBtn) {
+  var quickBtnOriginal = quickBtn.textContent;
+  quickBtn.addEventListener('click', function (e) {
+    var repo = document.getElementById('quick-repo').value.trim();
+    // Sem repo escolhido -> abre solto na pasta que contem todos os repos
+    // (reposBasePath), em vez de nao fazer nada.
+    var targetPath = repo ? ('__REPOS_BASE_PATH__\\' + repo) : '__REPOS_BASE_PATH__';
+    var cmd = 'powershell -NoProfile -Command "cd \'' + targetPath + '\'; claude"';
+    // -run: aperta Enter sozinho - so abre uma janela solta do Claude, sem
+    // disparar nenhuma skill nem gravar nada, diferente dos outros botoes.
+    quickBtn.setAttribute('href', 'biblioteca-cmd-run:' + encodeURIComponent(cmd));
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = cmd;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (err) {}
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).catch(fallback);
+    } else {
+      fallback();
+    }
+    quickBtn.textContent = 'Copiado!';
+    setTimeout(function () { quickBtn.textContent = quickBtnOriginal; }, 1500);
+  });
+}
 
 document.querySelectorAll('.expand-btn').forEach(function (btn) {
   btn.addEventListener('click', function () {
@@ -1281,32 +1680,40 @@ document.querySelectorAll('.star-btn').forEach(function (btn) {
 applyCurrent();
 
 var search = document.getElementById('search');
-if (search) {
-  search.addEventListener('input', function () {
-    var q = search.value.trim().toLowerCase();
-    document.querySelectorAll('.grid').forEach(function (grid) {
-      var cards = grid.querySelectorAll('.card');
-      if (cards.length === 0) { return; }
-      var anyVisible = false;
-      cards.forEach(function (card) {
-        var match = !q || card.getAttribute('data-search').indexOf(q) !== -1;
-        card.style.display = match ? '' : 'none';
-        if (match) { anyVisible = true; }
-      });
-      var emptyMsg = grid.querySelector('.empty-search');
-      if (!anyVisible) {
-        if (!emptyMsg) {
-          emptyMsg = document.createElement('p');
-          emptyMsg.className = 'empty empty-search';
-          emptyMsg.textContent = 'Nenhuma task encontrada.';
-          grid.appendChild(emptyMsg);
-        }
-      } else if (emptyMsg) {
-        emptyMsg.remove();
-      }
+var quickRepoFilter = document.getElementById('quick-repo');
+
+// Filtro combinado: texto livre (search) E repo escolhido no "Abrir Claude"
+// (quick-repo) - o repo funciona como um 2o ponto de filtro, nao substitui
+// a busca. Os dois reaplicam o mesmo applyFilters ao mudar.
+function applyFilters() {
+  var q = search ? search.value.trim().toLowerCase() : '';
+  var repoQ = quickRepoFilter ? quickRepoFilter.value.trim().toLowerCase() : '';
+  document.querySelectorAll('.grid').forEach(function (grid) {
+    var cards = grid.querySelectorAll('.card');
+    if (cards.length === 0) { return; }
+    var anyVisible = false;
+    cards.forEach(function (card) {
+      var searchMatch = !q || card.getAttribute('data-search').indexOf(q) !== -1;
+      var repoMatch = !repoQ || (card.getAttribute('data-repo') || '').indexOf(repoQ) !== -1;
+      var match = searchMatch && repoMatch;
+      card.style.display = match ? '' : 'none';
+      if (match) { anyVisible = true; }
     });
+    var emptyMsg = grid.querySelector('.empty-search');
+    if (!anyVisible) {
+      if (!emptyMsg) {
+        emptyMsg = document.createElement('p');
+        emptyMsg.className = 'empty empty-search';
+        emptyMsg.textContent = 'Nenhuma task encontrada.';
+        grid.appendChild(emptyMsg);
+      }
+    } else if (emptyMsg) {
+      emptyMsg.remove();
+    }
   });
 }
+if (search) { search.addEventListener('input', applyFilters); }
+if (quickRepoFilter) { quickRepoFilter.addEventListener('input', applyFilters); }
 
 // Auto-reload: dashboard.html e' estatico, sync-all.ps1 regenera o arquivo
 // mas a aba aberta nao sabe sozinha - sem servidor rodando, um file:// nao
@@ -1324,6 +1731,7 @@ function saveReloadState() {
   );
   var state = {
     search: search ? search.value : '',
+    quickRepo: quickRepoFilter ? quickRepoFilter.value : '',
     expanded: expandedIds,
     scrollY: window.scrollY
   };
@@ -1336,9 +1744,12 @@ function restoreReloadState() {
   sessionStorage.removeItem(RELOAD_STATE_KEY);
   var state;
   try { state = JSON.parse(raw); } catch (e) { return; }
+  if (quickRepoFilter && state.quickRepo) { quickRepoFilter.value = state.quickRepo; }
   if (search && state.search) {
     search.value = state.search;
     search.dispatchEvent(new Event('input'));
+  } else if (quickRepoFilter && state.quickRepo) {
+    quickRepoFilter.dispatchEvent(new Event('input'));
   }
   var expanded = state.expanded || [];
   if (expanded.length) {
@@ -1359,6 +1770,25 @@ setInterval(function () { saveReloadState(); location.reload(); }, LIVE_RELOAD_M
 </html>
 '@
 
+# Acesso rapido "Abrir Claude" - so aparece se reposBasePath estiver
+# configurado (sem ele nao ha path valido pra montar o comando). Repo
+# escolhido no navegador -> comando montado em JS no clique (ver $foot),
+# mesmo mecanismo biblioteca-cmd:/clipboard dos outros botoes.
+$quickOpenHtml = ''
+$reposBasePathJs = if ($bibConfig.reposBasePath) { $bibConfig.reposBasePath.Replace('\', '\\') } else { '' }
+$foot = $foot.Replace('__REPOS_BASE_PATH__', $reposBasePathJs)
+if ($bibConfig.reposBasePath) {
+    $quickOpenHtml = @"
+<div class="quick-open">
+  <input type="text" id="quick-repo" list="quick-repos" placeholder="Repositorio..." autocomplete="off">
+  <datalist id="quick-repos">
+$knownReposOptionsHtml
+  </datalist>
+  <a class="claude-btn" id="quick-open-btn" href="#">Abrir Claude</a>
+</div>
+"@
+}
+
 $body = @"
 <header class="top-header">
   <span class="brand-icon">$brandIconGreen</span>
@@ -1369,15 +1799,17 @@ $body = @"
       <span class="stat"><span class="dot dot-neutral"></span>$($doneCards.Count) completas</span>
     </p>
   </div>
+  <div class="search-wrap">
+    <span class="search-icon">$searchIcon</span>
+    <input id="search" type="text" placeholder="Buscar por task, repo ou descricao..." autocomplete="off">
+  </div>
+  $quickOpenHtml
+  <a class="copy-btn primary-link" href="nova-task.html" target="_blank">+ Nova Task</a>
+  <a class="palette-link" href="historico-nova-task.md" target="_blank">$archiveIcon Historico</a>
   <a class="palette-link" href="paleta.html" target="_blank">$paletteIcon Paleta de cores</a>
   <a class="palette-link" href="archive.html" target="_blank">$archiveIcon Arquivo</a>
   <a class="palette-link" href="pendencias.html" target="_blank">$pendIcon Pendencias$(if ($pendenciasCount) { " ($pendenciasCount)" })</a>
 </header>
-
-<div class="search-wrap">
-  <span class="search-icon">$searchIcon</span>
-  <input id="search" type="text" placeholder="Buscar por task, repo ou descricao..." autocomplete="off">
-</div>
 
 <h2>Ativas</h2>
 <div class="grid" id="grid-active">
@@ -1394,9 +1826,41 @@ $html = $head + $body + $foot
 $outPath = Join-Path $hubRoot 'dashboard.html'
 [System.IO.File]::WriteAllText($outPath, $html)
 
+# Redirect no caminho antigo (raiz/dashboard-visual/) - a reorganizacao de
+# 17/08/2026 moveu o dashboard pra dentro de _ferramenta/, mas favorito/
+# aba ja aberta no navegador continua apontando pro path velho. Sem isso,
+# quem nao atualizou o favorito acha que o dashboard "parou de mostrar"
+# coisa nova, quando na verdade esta olhando um arquivo/cache antigo.
+$legacyRedirect = @"
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=../_ferramenta/dashboard-visual/dashboard.html">
+<title>Biblioteca - redirecionando...</title>
+</head><body>
+<p>O dashboard mudou de lugar - redirecionando pra
+<a href="../_ferramenta/dashboard-visual/dashboard.html">_ferramenta/dashboard-visual/dashboard.html</a>.
+Atualize seu favorito.</p>
+<script>location.replace('../_ferramenta/dashboard-visual/dashboard.html');</script>
+</body></html>
+"@
+$legacyDir = Join-Path $root 'dashboard-visual'
+New-Item -ItemType Directory -Force -Path $legacyDir | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $legacyDir 'dashboard.html'), $legacyRedirect)
+
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'paleta.html'), (Build-PaletteHtml))
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'archive.html'), (Build-ArchiveHtml))
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'pendencias.html'), (Build-PendenciasHtml))
+[System.IO.File]::WriteAllText((Join-Path $hubRoot 'nova-task.html'), (Build-NovaTaskHtml))
+
+# Historico de criacao de tasks (o proprio agente anexa as entradas,
+# seguindo a instrucao embutida no prompt de nova-task.html - sem skill
+# dedicada) - so' garante que o arquivo existe pra o link "Historico" do
+# header nao dar 404 antes da 1a task criada pelo formulario; nunca
+# sobrescreve conteudo.
+$historicoPath = Join-Path $hubRoot 'historico-nova-task.md'
+if (-not (Test-Path $historicoPath)) {
+    [System.IO.File]::WriteAllText($historicoPath, "# Historico de criacao de tasks`n`nEntradas anexadas pelo agente (instrucao embutida no prompt de nova-task.html) a cada task criada - append-only, nao editar a mao.`n")
+}
 
 # Related tasks (cross-repo): mesma task numerica, ou mesmo cluster exato
 # (so' task "general"), aparecendo em outro card/repo. So' usado na pagina

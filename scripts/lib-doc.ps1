@@ -1,6 +1,6 @@
 # Shared helpers - Biblioteca de Handovers (ponytail: single PS lib, no framework)
 
-$script:LibRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$script:LibRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 $script:TypeLabels = @{
     'rules' = 'Regras'
@@ -205,7 +205,7 @@ function Build-RelatedSection($meta) {
 
 function Serialize-Frontmatter($meta) {
     $lines = @('---')
-    $order = @('number', 'type', 'status', 'repo', 'task', 'function', 'stub', 'cluster', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
+    $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'stub', 'cluster', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
     foreach ($key in $order) {
         if (-not $meta.ContainsKey($key)) { continue }
         if ($key -eq 'related') {

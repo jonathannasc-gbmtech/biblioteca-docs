@@ -34,7 +34,10 @@ Biblioteca/
 ├── INDEX.md                  # gerado
 ├── CATALOGO.md                # gerado
 ├── 01-regras-biblioteca.md
-├── scripts/                   # sync-header, lint-clusters, build-index, sync-all, pre-commit-check
+├── _ferramenta/                # o "motor" — scripts, dashboard, screenshots
+│   ├── scripts/                # sync-header, lint-clusters, build-index, sync-all, pre-commit-check
+│   ├── dashboard-visual/        # dashboard HTML gerado + skills locais (task-hub-*)
+│   └── docs/screenshots/        # imagens do README
 ├── _templates/                # task-code, task-planning, testes, resumo, handover-tecnico
 ├── task-code/{frontend,backend}/
 ├── task-planning/{frontend,backend}/
@@ -42,8 +45,7 @@ Biblioteca/
 ├── resumo/{frontend,backend}/
 ├── handover-tecnico/{frontend,backend}/
 ├── reqs/                       # REQ/card original verbatim, fora do indice numerado
-├── _archive/                   # docs substituidos ou anteriores a esta convencao
-└── dashboard-visual/           # dashboard HTML gerado + skills locais (task-hub-*)
+└── _archive/                   # docs substituidos ou anteriores a esta convencao
 ```
 
 ---

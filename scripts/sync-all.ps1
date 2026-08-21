@@ -13,6 +13,6 @@ if ($LASTEXITCODE) {
     exit 1
 }
 & (Join-Path $PSScriptRoot 'build-index.ps1')
-$dashboardScript = Join-Path $root 'dashboard-visual\scripts\build-dashboard.ps1'
+$dashboardScript = Join-Path $root '_ferramenta\dashboard-visual\scripts\build-dashboard.ps1'
 if (Test-Path $dashboardScript) { & $dashboardScript }
 Write-Host 'sync-all: concluido.'

@@ -11,8 +11,11 @@ Todo card do `dashboard.html` (Ativas e Completas) e a página de resumo têm
 um botão **"Ajustes QA"** que copia:
 
 ```
-cd "<pasta-da-biblioteca>\dashboard-visual"; claude "ajustar qa task <task> no repo <repo>"
+powershell -NoProfile -Command "cd '<pasta-da-biblioteca>\dashboard-visual'; claude 'ajustar qa task <task> no repo <repo>'"
 ```
+
+(envolvido em `powershell -NoProfile -Command` pra funcionar colado tanto no
+cmd.exe quanto no PowerShell — `;` sozinho quebra no cmd.exe)
 
 Cenário: a task já foi concluída e mergeada (PR fechado, `status: completed`
 na Biblioteca), mas o retorno do QA chegou depois — o repositório precisa
@@ -57,7 +60,9 @@ exatamente os passos 1-5 da "Rotina de retomada" em
 - **Toca o `resumo`** da task+repo (gatilho já existente em
   `controle-documentacao` pra qualquer atualização de doc da task) —
   atualizar "Status atual" mencionando a rodada de QA em andamento, sem
-  mudar `status` do resumo.
+  mudar `status` do resumo. Gravar também o campo `branch:` com o nome
+  resolvido/criado no passo 3 (quase sempre uma branch nova, já que a
+  original foi mergeada e deletada) — sobrescreve o valor anterior.
 - Rodar `scripts\sync-all.ps1` da Biblioteca depois.
 
 ## Depois de reativar

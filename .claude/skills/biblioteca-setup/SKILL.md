@@ -57,6 +57,22 @@ Se o usuário disser que não usa, ou não colar nada: `azureOrgUrl` fica
 `null`/ausente. A pill do Azure simplesmente não aparece em nenhum card —
 não é um erro, é o comportamento esperado sem essa integração.
 
+**Testar o MCP `azure-devops` com o link colado.** Se o usuário colou um
+link, além de extrair `azureOrgUrl` por regex, chamar
+`mcp__azure-devops__wit_work_item` (`action: get`, `id` extraído do link,
+`expand: Relations`) pra confirmar que o MCP está conectado de verdade —
+é o mesmo procedimento que o botão "+ Nova Task" do dashboard usa pra
+buscar REQ/parent sozinho. Mostrar o resultado objetivo: "Achei: #{id} -
+{título} (parent: #{parent}, se houver). Bateu?" Só ferramentas de leitura
+(`wit_work_item` action `get`) — nunca `wit_work_item_write`/
+`wit_work_item_comment_write`/`wit_work_item_link_write`/`wit_backlog`.
+Se o MCP não estiver instalado/conectado nessa máquina, avisar que
+`azureOrgUrl` ainda funciona sozinho (link direto nos cards), só o
+preenchimento automático de REQ/parent do "+ Nova Task" fica indisponível
+até o MCP ser configurado (`claude mcp add --scope user`, ver
+`_ferramenta/dashboard-visual/CLAUDE.md`) — não é bloqueante pro resto da
+Biblioteca.
+
 ## Gravar o config
 
 Criar `biblioteca.config.json` na raiz do repo:
@@ -74,11 +90,12 @@ sugerir commitar.
 
 ## Depois de gravar
 
-1. Rodar `powershell -ExecutionPolicy Bypass -File scripts/sync-all.ps1`.
+1. Rodar `powershell -ExecutionPolicy Bypass -File _ferramenta/scripts/sync-all.ps1`.
 2. Confirmar que rodou sem erro (lint-clusters ok, dashboard gerado).
-3. Avisar o usuário: "Configurado. Abra `dashboard-visual/dashboard.html`
-   no navegador pra ver o dashboard — comece criando sua primeira task
-   pela skill `controle-documentacao`."
+3. Avisar o usuário: "Configurado. Abra
+   `_ferramenta/dashboard-visual/dashboard.html` no navegador pra ver o
+   dashboard — comece criando sua primeira task pela skill
+   `controle-documentacao`."
 
 ## O que essa skill NÃO faz
 

@@ -60,6 +60,23 @@ motivou, quais testes já rodaram — e a parte que mais economiza tempo:
 - Link do Azure e de todos os PRs relacionados juntos, na mesma caixa dos
   botões de ação — não espalhados pela página.
 
+### "+ Nova Task" — abre o Claude já no repo certo, sem digitar path
+
+Botão no header abre um formulário (link do Azure, repo, descrição) — o
+prompt se monta sozinho numa caixa ao lado, ajustável antes de enviar.
+"Abrir Claude" copia o comando e tenta abrir direto um terminal já na
+pasta do repositório escolhido, via um protocolo customizado
+(`biblioteca-cmd:`, registro único por máquina — opcional, sem ele cai no
+fallback de sempre: copia pro clipboard). Se o MCP `azure-devops`
+(somente leitura, ver abaixo) estiver conectado, o Claude busca sozinho o
+REQ e o item pai daquele work item antes de gravar qualquer documento —
+mostra o link encontrado e pede uma confirmação objetiva, nunca escreve
+de volta no Azure.
+
+O mesmo header também tem um botão **"Abrir Claude"** — abre uma janela
+solta em qualquer repo do datalist, sem task nem skill nenhuma disparando,
+só pra conversar.
+
 ### Outros recursos
 
 - **Pendências** — quando um `resumo` fica pra trás (a task já não está
@@ -86,9 +103,11 @@ vez:
 2. **Onde ficam os repositórios dos seus projetos** — pra saber onde entrar
    quando você pedir pra retomar uma task.
 3. **Um link de task do Azure DevOps, se você usar** — cola qualquer uma
-   que já exista e a Biblioteca extrai a organização sozinha. Não usa Azure
-   DevOps? Pula essa pergunta — a pill correspondente simplesmente não
-   aparece em nenhum card.
+   que já exista e a Biblioteca extrai a organização sozinha. Se o MCP
+   `azure-devops` já estiver configurado nessa máquina, o Claude também
+   testa a conexão nesse momento (busca aquele work item de verdade e
+   mostra o título encontrado). Não usa Azure DevOps? Pula essa pergunta —
+   a pill correspondente simplesmente não aparece em nenhum card.
 
 No fim, ela grava `biblioteca.config.json` (arquivo pessoal, fora do Git) e
 já roda a primeira sincronização — o dashboard abre pronto pra uso.
@@ -128,10 +147,13 @@ Biblioteca/
 ├── INDEX.md                 # gerado — não editar
 ├── CATALOGO.md               # histórico completo, gerado
 ├── 01-regras-biblioteca.md
-├── scripts/
-│   ├── sync-all.ps1          # rodar após cada edição
-│   ├── lint-clusters.ps1     # trava colisão de cluster/resumo antes de gerar
-│   └── lib-doc.ps1           # parsing/geração compartilhado
+├── _ferramenta/              # o "motor" — scripts, dashboard, screenshots
+│   ├── scripts/
+│   │   ├── sync-all.ps1      # rodar após cada edição
+│   │   ├── lint-clusters.ps1 # trava colisão de cluster/resumo antes de gerar
+│   │   └── lib-doc.ps1       # parsing/geração compartilhado
+│   ├── dashboard-visual/     # gerador do dashboard + skills locais
+│   └── docs/screenshots/     # imagens usadas neste README
 ├── _templates/{tipo}.md
 ├── task-code/{frontend,backend}/
 ├── task-planning/{frontend,backend}/
@@ -139,8 +161,7 @@ Biblioteca/
 ├── resumo/{frontend,backend}/
 ├── handover-tecnico/{frontend,backend}/
 ├── reqs/                     # REQ original verbatim, fora do índice numerado
-├── _archive/                 # planos/resumos superados (ver pág. "Arquivo")
-└── dashboard-visual/         # gerador do dashboard + skills locais
+└── _archive/                 # planos/resumos superados (ver pág. "Arquivo")
 ```
 
 ### Tipos de documento
@@ -198,6 +219,15 @@ sessão do Claude Code abre dentro de `dashboard-visual/`.
   inteira a cada 20s (preservando busca, cards abertos e scroll) pra
   refletir mudanças salvas por `sync-all.ps1` — não é uma atualização
   instantânea via servidor, é uma releitura periódica do arquivo estático.
+- **Protocolo `biblioteca-cmd:` é opcional, por máquina.** Sem rodar
+  `dashboard-visual/scripts/register-protocol.ps1` uma vez, os
+  botões de ação continuam funcionando no fallback de sempre (copiar pro
+  clipboard) — só não abrem o terminal sozinhos.
+- **MCP `azure-devops` é opcional e somente leitura.** Sem ele, "+ Nova
+  Task" ainda funciona — só não preenche REQ/parent sozinho, você digita
+  na mão. Quando conectado, é travado em 3 camadas (PAT com escopo
+  "Work Items: Read", `permissions.deny` global e instrução embutida no
+  prompt) pra nunca escrever de volta no Azure DevOps.
 
 ### Git
 

@@ -105,17 +105,142 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   restaurar stash, reler docs), mas **não muda `status`** dos docs (task continua
   `completed`, continua em "Completas") — só registra uma nota "Ajustes
   QA" no doc `testes/` dessa task+repo e toca o `resumo`.
+- **Branch visível na página de resumo** — campo opcional `branch:` no
+  frontmatter do doc `resumo` (ver `controle-documentacao`), gravado por
+  `task-hub-resume`/`task-hub-qa` depois de resolver/criar a branch via
+  `git` (nunca inventado por quem lê). Aparece no `head-row` da página de
+  resumo, ao lado do repo — só lá, não no card compacto do dashboard
+  (decisão explícita: manter o card enxuto).
+- **Lançamento automático via protocolo `biblioteca-cmd:`** — cada botão
+  de ação (`Copiar comando`, `Reabrir p/ QA`, e os novos "Nova Task"/"Abrir
+  Claude") é um `<a href="biblioteca-cmd:<comando url-encoded>">` além de
+  copiar pro clipboard (comportamento antigo, mantido como fallback). Um
+  dois protocolos customizados registrados uma vez por máquina via
+  `scripts/register-protocol.ps1` (edição de registro em `HKCU`, nunca
+  automática — o usuário roda esse script manualmente quando quiser
+  habilitar), ambos entregues pro mesmo `scripts/launch-command.vbs`:
+  `biblioteca-cmd:` abre um `cmd` novo e **digita o comando sem apertar
+  Enter** (decisão explícita — usuário revisa e confirma manualmente) e é o
+  padrão pra qualquer ação que dispara skill ou grava algo (retomar/QA/nova
+  task); `biblioteca-cmd-run:` digita **e aperta Enter sozinho** — só usado
+  pelo botão "Abrir Claude" (header), que não dispara skill nem grava nada,
+  é só uma janela solta do Claude. Sem o protocolo registrado, o link
+  simplesmente não faz nada além do clipboard de sempre — degrada bem.
+- `nova-task.html` — botão **+ Nova Task** do
+  header abre essa página numa aba nova (não pergunta nada por chat de
+  saída): formulário com link do Azure, link do parent (opcional), repo
+  (`<datalist>` com os repos já conhecidos + pastas reais de
+  `reposBasePath`) e a demanda em texto livre. Ao gerar o comando, ele
+  **abre o Claude direto na pasta do repositório escolhido** (não mais
+  dentro da própria Biblioteca) com um prompt único e auto-suficiente —
+  dump completo (Azure/parent/repo/descrição) + instruções embutidas no
+  próprio texto: buscar REQ/parent via MCP `azure-devops` (se conectado) e
+  confirmar antes de gravar qualquer doc, mover-se pra pasta certa se essa
+  não for o repo esperado, seguir o fluxo global já existente
+  (`gbm-triagem` → `criar-task-code` → `plano-acao`, do `CLAUDE.md` do
+  usuário — dispara sozinho, sem gatilho especial daqui), e por fim anexar
+  uma entrada em `historico-nova-task.md`. **Não existe skill dedicada**
+  pra esse fluxo (havia uma, `task-hub-new`, retirada) — o prompt é
+  autossuficiente porque abre no repo certo e usa o mesmo gate global que
+  já dispara pra qualquer demanda digitada nesse repo. Visual em 3 seções
+  (cartão, mesmo estilo de `.resumo-section`): "Origem" (accent azul de
+  `.ext-azure`, ícone `$linkIcon` reaproveitado — mesma cor/ícone que já
+  representa "Azure" em qualquer outro lugar da Biblioteca), "Repositório"
+  (com dica de path absoluto ao vivo conforme digita) e "Demanda". A caixa
+  de **Prompt** é editável e atualiza sozinha a partir dos campos — só
+  para de sincronizar se o usuário editá-la manualmente (mostra um link
+  "recalcular"). Comando powershell bruto fica escondido num `<details>`,
+  não é mais a caixa principal. Botão único **Abrir Claude**
+  (`.claude-btn`, cor terracota — mesma da acima) faz tudo num clique:
+  valida, monta o comando a partir do texto atual do prompt (editado ou
+  não), copia e tenta lançar via `biblioteca-cmd:`.
+- **MCP `azure-devops` — SÓ LEITURA, 3 camadas de trava.** Servidor
+  oficial da Microsoft (`@azure-devops/mcp`, org Trizy), registrado em
+  **escopo user** (`claude mcp add --scope user`, em `~/.claude.json` —
+  disponível em qualquer repo/sessão, não só na Biblioteca; precisa ser
+  assim porque "Nova Task" agora abre direto no repo, não mais aqui).
+  Autenticação via PAT com escopo "Work Items: Read" no próprio Azure
+  DevOps (variável de ambiente do usuário `PERSONAL_ACCESS_TOKEN`,
+  `base64("<email>:<pat>")` — nunca gravado em arquivo de repo nenhum).
+  Três camadas, nenhuma sozinha é à prova de falha, juntas cobrem qualquer
+  furo: **(1)** o PAT em si — Azure DevOps rejeita qualquer chamada de
+  escrita mesmo que uma ferramenta apareça disponível; **(2)**
+  `permissions.deny` em `~/.claude/settings.json` (**global**, não mais
+  local a esta pasta — o MCP agora vale em qualquer repo) bloqueia
+  `wit_work_item_write`, `wit_work_item_comment_write`,
+  `wit_work_item_link_write` e `wit_backlog` (esse último bloqueado por
+  completo, não só a escrita — mistura leitura/escrita numa única
+  ferramenta, sem granularidade pra separar, e não é usado por nenhum
+  fluxo aqui); **(3)** a instrução embutida no próprio prompt do
+  `nova-task.html` proibindo chamar essas ferramentas mesmo que apareçam
+  (antes vivia num SKILL.md dedicado — agora é texto simples no prompt,
+  já que não há skill). O filtro `-d core work-items` do comando
+  registrado só reduz a lista de ferramentas por área de produto (nem
+  repositórios, nem pipelines, nem wiki) — não separa leitura de escrita
+  dentro do domínio, por isso não é uma trava por si só.
+- `historico-nova-task.md` (raiz desta pasta, link **Histórico** no
+  header) — log append-only de toda task criada via `nova-task.html`,
+  escrito pelo próprio agente seguindo a instrução embutida no prompt
+  (nunca editado à mão, e não existe mais skill dedicada pra isso). Serve
+  pra checar rápido, se uma task der problema depois, se a causa já estava
+  no que foi capturado/confirmado na criação ou surgiu só na
+  implementação — sem precisar reconstruir isso via `git log`/`git blame`
+  do `task-code`. `build-dashboard.ps1` só garante que o arquivo existe
+  (stub vazio) pra o link não dar 404 antes da primeira task criada.
+- **"Abrir Claude" no header** — seletor de repo (`<input>` com
+  `<datalist>`, mesma lista de `nova-task.html`, mesma altura da caixa de
+  busca ao lado) + botão `.claude-btn` (cor própria — terracota/laranja,
+  distinta do dourado geral, só pra sinalizar "isto abre o Claude") que
+  abre um `cmd` na pasta daquele repo com `claude` digitado e **Enter
+  automático** (`biblioteca-cmd-run:` — é a única ação com auto-Enter, ver
+  acima), sem frase nenhuma, sem skill disparando — só uma janela rápida
+  pra quem quer conversar sem estar amarrado a nenhuma task. Sem repo
+  escolhido no campo, abre solto direto em `reposBasePath` (a pasta que
+  contém todos os repos) em vez de não fazer nada. O comando é montado em
+  JS no clique (depende do repo escolhido no navegador, não dá pra
+  pré-computar em build-time). Só aparece se `reposBasePath` estiver
+  configurado em `biblioteca.config.json`. Ordem no header (uma linha só,
+  não mais duas): busca → campo de repo → Abrir Claude → + Nova Task →
+  Histórico/Paleta/Arquivo/Pendências.
+- **Campo de repo do "Abrir Claude" também filtra a grade** — digitar/
+  escolher um repo nesse campo funciona como um 2º ponto de filtro além da
+  busca de texto (`#search`), não como uma ação isolada. `applyFilters()`
+  (função única no `$foot` de `build-dashboard.ps1`) combina os dois: texto
+  E repo, ambos precisam bater pro card ficar visível. Cada card carrega
+  `data-repo` (minúsculo, gerado por `Build-Card`) só pra esse match — não
+  reaproveita o `data-search` (esse é fuzzy, cobre task+repo+descrição
+  junto; o filtro de repo precisa ser específico). Estado do campo também
+  entra no `sessionStorage` do auto-reload (mesmo mecanismo do `#search`),
+  não se perde a cada 20s.
+- **Ordenação do `<datalist>` de repos** (usado em `nova-task.html` e no
+  "Abrir Claude") — não é alfabética pura: `Get-RepoSortKey` em
+  `build-dashboard.ps1` agrupa backend + mfe/mobile do mesmo domínio juntos
+  (ex.: `gbm-app-settings-backend` do lado de `gbm-mfe-settings`), joga
+  domínios sem par (migrations, geral) depois dos pares, e repos de
+  skills pessoais (`gbm-ai-skills`, `jow-ai-skills`, `ponytail` — lista
+  fixa, não é heurística) sempre por último. Também filtra fora qualquer
+  entrada que não pareça nome de pasta de verdade (vírgula/espaço — sinal
+  de campo `repo:` de algum doc com 2 valores colados por engano).
 
 ## Protocolo de seleção
 
 **Caminho principal:** abrir `dashboard.html` (favoritado no navegador) →
 buscar/achar a task → expandir o card (seta no canto inferior direito) →
 clicar "Copiar comando" ou "Ajustes QA" (ou abrir a
-caixa de ações na página de resumo) → colar o comando copiado num
-terminal. Cada um abre `claude "<frase>"` reconhecida por uma skill
-específica (`retomar`/`concluir`/`ajustar qa` + task + repo) — vai direto
-ao fluxo certo, sem menu. A estrela de favorito não copia nada — o efeito
-já acontece na própria página (ver acima).
+caixa de ações na página de resumo) → um `cmd` novo abre com o comando já
+digitado (protocolo `biblioteca-cmd:`, se registrado) ou o texto já está no
+clipboard pra colar (fallback) → apertar Enter é sempre manual. Cada
+comando abre `claude "<frase>"` reconhecida por uma skill específica
+(`retomar`/`concluir`/`ajustar qa` + task + repo) — vai direto ao fluxo
+certo, sem menu. A estrela de favorito não copia nada — o efeito já
+acontece na própria página (ver acima).
+
+**Task nova (sem task existente ainda):** botão "+ Nova Task" no header →
+`nova-task.html` numa aba → preencher e gerar o comando → mesmo lançamento
+(protocolo/clipboard), abrindo o Claude direto na pasta do repositório
+escolhido → o prompt (auto-suficiente, sem skill dedicada) dispara o gate
+global do `CLAUDE.md` do usuário sozinho, igual qualquer demanda digitada
+nesse repo (ver acima).
 
 **Alternativa (sem passar pelo dashboard):** a listagem de texto aparece
 no início da sessão; digitar o número direto funciona, ou mandar algo

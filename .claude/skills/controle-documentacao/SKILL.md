@@ -4,7 +4,7 @@ description: >-
   Controle de documentacao na Biblioteca. Use para handover, handoff, task-code, plano de execucao,
   testes (unitarios+manuais no mesmo doc), ou doc tecnica para agentes. NUNCA gravar corpo completo
   em docs/ do repo do projeto — so biblioteca + stub. Apos salvar qualquer documento, rodar
-  scripts/sync-all.ps1. NUNCA editar INDEX.md nem tabela manualmente.
+  _ferramenta/scripts/sync-all.ps1. NUNCA editar INDEX.md nem tabela manualmente.
 ---
 
 # Controle de documentacao
@@ -20,7 +20,7 @@ description: >-
 3. Preencher APENAS frontmatter YAML + corpo (H1 em diante)
 4. NAO escrever tabela de metadados — gerada pelo script
 5. Salvar em `{tipo}/frontend/` ou `{tipo}/backend/` conforme `repo`
-6. Rodar: powershell -ExecutionPolicy Bypass -File scripts/sync-all.ps1
+6. Rodar: powershell -ExecutionPolicy Bypass -File _ferramenta/scripts/sync-all.ps1
 ```
 
 ## Buscar/pesquisar na Biblioteca (custo de tokens)
@@ -43,7 +43,7 @@ se o resumo não tiver a resposta.
 | `task-code` | `task-code/{frontend\|backend}/` | Card/issue do seu rastreador de tarefas / spec da branch |
 | `task-planning` | `task-planning/{frontend\|backend}/` | Plano de execucao; multiplos planos = secoes no mesmo arquivo |
 | `testes` | `testes/{frontend\|backend}/` | **Um doc por task** — unitarios + manuais juntos |
-| `resumo` | `resumo/{frontend\|backend}/` | **Um doc por task+repo** — dado factual pro dashboard visual (`dashboard-visual/`, dentro da propria Biblioteca): Status atual / O que foi implementado / REQs seguidas / O que falta. Nao precisa de prosa polida como os outros tipos — bullets factuais bastam, quem le e o gerador de HTML, nao um humano direto no `.md`. Atualizado a cada gatilho que toca a documentacao da task (ver Gatilhos automaticos), nao so no inicio/fim — fica fresco o tempo todo, nao so na conclusao. |
+| `resumo` | `resumo/{frontend\|backend}/` | **Um doc por task+repo** — dado factual pro dashboard visual (`_ferramenta/dashboard-visual/`, dentro da propria Biblioteca): Status atual / O que foi implementado / REQs seguidas / O que falta. Nao precisa de prosa polida como os outros tipos — bullets factuais bastam, quem le e o gerador de HTML, nao um humano direto no `.md`. Atualizado a cada gatilho que toca a documentacao da task (ver Gatilhos automaticos), nao so no inicio/fim — fica fresco o tempo todo, nao so na conclusao. Campo `branch:` opcional no frontmatter (nome exato resolvido/criado via `git`) — gravado por `task-hub-resume`/`task-hub-qa` (dashboard-visual), exibido no topo da pagina de resumo. Nao inventar o valor aqui: so quem resolveu a branch via `git` grava esse campo. |
 | `handover-tecnico` | `handover-tecnico/{frontend\|backend}/` | Playbook, modulo, contrato API, convencoes |
 | `rules` | raiz | So `01-regras-biblioteca.md` |
 | `reqs` | `reqs/` (plano, sem split frontend/backend) | Card/issue original verbatim, incluindo o item pai (feature/epic ou equivalente) quando houver — referencia crua, fora do indice numerado e do `sync-all.ps1` |
@@ -101,7 +101,7 @@ Antes de criar ou aprovar um `task-planning`, o card/REQ original (seu rastreado
 | Usuario pede mensagem de commit ou fecha entrega | `status: completed` no `testes/`, no `task-planning` **e no `task-code`** — o `task-code` nao fica preso em `draft`/`Rascunho` so porque nenhum gatilho anterior o tocou |
 | Usuario responde "Task resolvida?" = sim (pos-PR) | Registrar link do PR (`related` ou nota); rodar o last check do Gate — REQ e parent; `status: completed` no task-code/planning/testes; `sync-all.ps1`. Se task-code nao existe ainda (fluxo ad-hoc sem spec previo): criar agora, salvando o REQ/pedido original em `reqs/` retroativamente |
 | Usuario responde "Task resolvida?" = nao | Perguntar o que falta; manter `status: in_progress`; registrar a lacuna no doc — nao fechar |
-| **Qualquer** atualizacao de `task-code`/`task-planning`/`testes`/`handover-tecnico` de uma task (nao so no inicio ou no fim) | Dar um toque no `resumo` dessa task+repo: criar se ainda nao existir, senao atualizar pelo menos **Status atual** e **O que falta** com o que mudou. Nao esperar o fim da task pra manter o resumo fresco — ele e' consultado a qualquer momento (dashboard visual em `dashboard-visual/`), nao so na conclusao. **"Ainda nao existir" e' verificavel, nao suposicao** — antes de criar um `resumo` novo, rodar `grep -rl "^task: {taskId}" resumo/` (task numerica) ou `grep -rln "^cluster: {cluster}" resumo/*/*.md` (task `general`) no repo da Biblioteca; só criar se vier vazio. Pular esse grep e' a causa mais comum de resumos duplicados ficarem escondidos do dashboard (colisao de `cluster`+`repo`) — `build-dashboard.ps1` so mostra 1 resumo por task+repo, sem avisar quando ha mais de um. |
+| **Qualquer** atualizacao de `task-code`/`task-planning`/`testes`/`handover-tecnico` de uma task (nao so no inicio ou no fim) | Dar um toque no `resumo` dessa task+repo: criar se ainda nao existir, senao atualizar pelo menos **Status atual** e **O que falta** com o que mudou. Nao esperar o fim da task pra manter o resumo fresco — ele e' consultado a qualquer momento (dashboard visual em `_ferramenta/dashboard-visual/`), nao so na conclusao. **"Ainda nao existir" e' verificavel, nao suposicao** — antes de criar um `resumo` novo, rodar `grep -rl "^task: {taskId}" resumo/` (task numerica) ou `grep -rln "^cluster: {cluster}" resumo/*/*.md` (task `general`) no repo da Biblioteca; só criar se vier vazio. Pular esse grep e' a causa mais comum de resumos duplicados ficarem escondidos do dashboard (colisao de `cluster`+`repo`) — `build-dashboard.ps1` so mostra 1 resumo por task+repo, sem avisar quando ha mais de um. |
 
 ## Frontmatter (fonte unica — sem duplicar na tabela)
 
@@ -112,10 +112,11 @@ type: task-planning
 status: in_progress
 repo: meu-app-frontend
 task: 101034
+branch: —              # opcional, so no doc `resumo` — nome real da branch resolvida via git (task-hub-resume/task-hub-qa gravam), exibido no topo da pagina de resumo
 function: Resumo de uma linha para o INDEX
 stub: —
-cluster: —             # opcional, so pra `task: general` — nome curto (2-4 palavras) que o dashboard usa como titulo do card no lugar de "Geral" E como chave de agrupamento (substitui o fallback por `related`/path — ver dashboard-visual/CLAUDE.md). Manter o MESMO texto em todo doc do mesmo assunto — e' isso que agrupa os docs no mesmo card.
-pr_pending: —          # opcional — url do PR quando aberto e ainda sem confirmacao de merge (ver dashboard-visual/CLAUDE.md, sweep automatico)
+cluster: —             # opcional, so pra `task: general` — nome curto (2-4 palavras) que o dashboard usa como titulo do card no lugar de "Geral" E como chave de agrupamento (substitui o fallback por `related`/path — ver _ferramenta/dashboard-visual/CLAUDE.md). Manter o MESMO texto em todo doc do mesmo assunto — e' isso que agrupa os docs no mesmo card.
+pr_pending: —          # opcional — url do PR quando aberto e ainda sem confirmacao de merge (ver _ferramenta/dashboard-visual/CLAUDE.md, sweep automatico)
 plan_active: plano-1          # so task-planning com multiplos planos
 related:
   - task-code/frontend/23-task-code-101034-terminal-side-sheet.md
@@ -178,7 +179,7 @@ Se voce tiver skills dedicadas a rodar/registrar testes (unitario, manual) → g
 - [ ] `updated` no YAML = hoje
 - [ ] `status` correto
 - [ ] `related` com links relativos na biblioteca
-- [ ] Rodar `scripts/sync-all.ps1`
+- [ ] Rodar `_ferramenta/scripts/sync-all.ps1`
 - [ ] Stub no repo se `stub:` preenchido (`docs/{stub}`)
 
 ## Regra absoluta — repo

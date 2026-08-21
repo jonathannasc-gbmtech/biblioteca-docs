@@ -14,10 +14,14 @@ tasks (Ativas/Completas), e clica em "Copiar comando" na task desejada.
 O comando copiado tem este formato:
 
 ```
-cd "<pasta-da-biblioteca>\dashboard-visual"; claude "retomar task <task> no repo <repo>"
+powershell -NoProfile -Command "cd '<pasta-da-biblioteca>\dashboard-visual'; claude 'retomar task <task> no repo <repo>'"
 ```
 
-(o `<pasta-da-biblioteca>` real vem do próprio comando copiado do dashboard — gerado dinamicamente, nunca hardcoded)
+(o `<pasta-da-biblioteca>` real vem do próprio comando copiado do dashboard —
+gerado dinamicamente, nunca hardcoded. Envolvido em `powershell -NoProfile
+-Command` pra funcionar colado tanto no cmd.exe quanto no PowerShell — `;`
+sozinho como separador quebra no cmd.exe, que tentava dar `cd` num caminho
+com o resto do comando grudado junto)
 
 Se a primeira mensagem do usuario na sessao bater com esse padrao (ou uma
 variacao proxima — "retomar task X no repo Y", "task X repo Y", etc.),
@@ -84,6 +88,7 @@ precisar de julgamento.
      sem esse campo, usar `main`) seguindo a convencao; `<tipo>` vem do
      task-planning da Biblioteca se estiver declarado la - se nao achar,
      perguntar antes de inventar.
+   - Guardar o nome resolvido (o passo 7 grava no `resumo`).
 4. **Restaurar checkpoint da task selecionada, se houver:** `git -C <path> stash list`
    procurando um stash rotulado `checkpoint/<taskId selecionada>: ...` de
    uma pausa anterior (pode nao ser o mais recente da lista - combinar
@@ -99,10 +104,12 @@ precisar de julgamento.
    {slug}-{taskId}.md` pra essa task+repo, criar agora. Atualizar as
    secoes **Status atual** e **O que falta** com o que foi levantado no
    passo 5 - bullets factuais, sem prosa polida (esse doc e' fonte de
-   dado pro `dashboard.html`, nao leitura direta). Nao precisa reescrever
-   **O que foi implementado**/**REQs seguidas** aqui - isso e' o
-   `task-hub-complete` que finaliza. Rodar `sync-all.ps1` da Biblioteca
-   depois.
+   dado pro `dashboard.html`, nao leitura direta). Gravar tambem o campo
+   `branch:` no frontmatter com o nome resolvido no passo 3 (aparece no
+   topo da pagina de resumo) - atualizar sempre, mesmo se o valor nao
+   mudou desde a ultima retomada. Nao precisa reescrever **O que foi
+   implementado**/**REQs seguidas** aqui - isso e' o `task-hub-complete`
+   que finaliza. Rodar `sync-all.ps1` da Biblioteca depois.
 
 ## Convencao do rotulo de checkpoint
 
