@@ -65,6 +65,31 @@ exatamente os passos 1-5 da "Rotina de retomada" em
   original foi mergeada e deletada) — sobrescreve o valor anterior.
 - Rodar `scripts\sync-all.ps1` da Biblioteca depois.
 
+## Bug relacionado achado durante o ajuste — resolve antes de subir, não só documenta
+
+Se, testando o que o QA reportou, aparecer **outro** bug real ligado à
+mesma task/tela em geral (endpoint irmão, mesma feature, mesmo fluxo —
+não precisa ser o mesmo sintoma nem o mesmo arquivo), ele **não é
+"fora de escopo" só por não ser o sintoma original relatado**. Tratar com
+a mesma prioridade: investigar causa raiz, propor fix, e resolver na
+mesma rodada antes de considerar a task pronta pra subir — não bastar
+"documentar e deixar pra depois" por conta própria. Confirmar com o
+usuário antes de aplicar o fix (mesmo gate de sempre), mas não empurrar a
+decisão de "isso importa?" pra ele sem analisar primeiro — a pergunta
+certa é "encontrei X, causa é Y, posso corrigir agora?", não "isso é bug
+ou feature, o que eu faço?".
+
+Exemplo real (task 104691, 2026-08-24): QA reportou 404 em 5 endpoints do
+dashboard (rota errada). Corrigido. Testando os outros 4 endpoints pra
+confirmar o fix, apareceu um `400` num deles (bug de SQL, sem relação
+alguma com rota) — inicialmente tratado como "achado separado, fora do
+escopo, decide você se quer que eu conserte" — feedback do usuário: isso
+deveria ter subido junto da mesma correção, é a mesma tela/task, não um
+bug não relacionado. Cada bug real achado numa rodada de QA vira sua
+própria branch/PR (não empacotar num só, mantém o diff pequeno e
+rastreável — ver PRs #296 e #300 da mesma task), mas todos entram na
+mesma rodada de "Ajustes QA", não ficam pendurados pra "depois".
+
 ## Depois de reativar
 
 Reportar ao usuário: branch preparada (nova ou reaproveitada), o que foi

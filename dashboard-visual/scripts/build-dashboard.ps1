@@ -221,7 +221,7 @@ function Get-CardCommands([PSCustomObject]$card) {
         $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = (Get-LaunchUri $cmd -AutoRun) })
     }
     $qaCmd = "powershell -NoProfile -Command `"$base; claude 'ajustar qa task $($card.Task) no repo $($card.Repo)'`""
-    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = Get-LaunchUri $qaCmd })
+    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = (Get-LaunchUri $qaCmd -AutoRun) })
     return $cmds
 }
 
@@ -1374,7 +1374,7 @@ launch.addEventListener('click', function (e) {
   var cmd = 'powershell -NoProfile -Command "cd \'$reposBasePathJs\\' + repo + '\'; claude \'' + escapedPhrase + '\'"';
 
   rawOutput.value = cmd;
-  launch.setAttribute('href', 'biblioteca-cmd:' + encodeURIComponent(cmd));
+  launch.setAttribute('href', 'biblioteca-cmd-run:' + encodeURIComponent(cmd));
 
   function fallback() {
     var ta = document.createElement('textarea');
@@ -1788,6 +1788,7 @@ var quickBtn = document.getElementById('quick-open-btn');
 if (quickBtn) {
   var quickBtnOriginal = quickBtn.textContent;
   quickBtn.addEventListener('click', function (e) {
+    e.preventDefault();
     var repo = document.getElementById('quick-repo').value.trim();
     // Sem repo escolhido -> abre solto na pasta que contem todos os repos
     // (reposBasePath), em vez de nao fazer nada.
@@ -1795,7 +1796,12 @@ if (quickBtn) {
     var cmd = 'powershell -NoProfile -Command "cd \'' + targetPath + '\'; claude"';
     // -run: aperta Enter sozinho - so abre uma janela solta do Claude, sem
     // disparar nenhuma skill nem gravar nada, diferente dos outros botoes.
-    quickBtn.setAttribute('href', 'biblioteca-cmd-run:' + encodeURIComponent(cmd));
+    var launchUrl = 'biblioteca-cmd-run:' + encodeURIComponent(cmd);
+    // Navegacao explicita (window.location.href), nunca o href/default-action
+    // do <a> - com preventDefault ativo o navegador nao segue o link sozinho
+    // mais (era isso que causava o scroll da pagina inteira no clique, sem
+    // garantia de ordem com a copia pro clipboard).
+    function goLaunch() { window.location.href = launchUrl; }
     function fallback() {
       var ta = document.createElement('textarea');
       ta.value = cmd;
@@ -1805,9 +1811,10 @@ if (quickBtn) {
       document.body.removeChild(ta);
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(cmd).catch(fallback);
+      navigator.clipboard.writeText(cmd).then(goLaunch).catch(function () { fallback(); goLaunch(); });
     } else {
       fallback();
+      goLaunch();
     }
     quickBtn.textContent = 'Abrindo...';
     setTimeout(function () { quickBtn.textContent = quickBtnOriginal; }, 1500);
