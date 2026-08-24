@@ -12,6 +12,30 @@ description: >-
 **Regras detalhadas:** `01-regras-biblioteca.md` (raiz deste repo)
 **Templates:** `_templates/{tipo}.md`
 
+## Primeiro: doc novo ou atualizacao de um que ja existe?
+
+**Atualizando um doc que ja existe** (a maioria do dia a dia — "atualiza
+esse resumo", "marca como completed", "anota esse achado no handover"):
+nao repetir o fluxo de criacao abaixo.
+
+1. Abrir o arquivo direto (ja se sabe path/nome — nao precisa de
+   `INDEX.md` pro proximo numero, nao precisa copiar template).
+2. Editar so o que mudou (corpo + campos do YAML relevantes,
+   `updated:` = hoje).
+3. Se o evento bater com uma linha da tabela "Gatilhos automaticos"
+   abaixo, seguir exatamente o que ela pede — **inclusive** o last check
+   do Gate REQ+parent quando o gatilho for esse especificamente (ex.:
+   fechar a task). O que NAO se repete numa atualizacao comum: o Gate de
+   CRIACAO ("antes de criar ou aprovar task-planning") e o grep
+   anti-duplicata de `resumo` ("antes de criar um resumo NOVO") — os dois
+   so valem pra doc que ainda nao existe.
+4. Rodar `sync-all.ps1`.
+
+Isso e tudo. So seguir o fluxo completo abaixo se for CRIAR um doc que
+ainda nao existe (numero novo, arquivo novo).
+
+**Criando um doc novo:** seguir o fluxo obrigatorio abaixo.
+
 ## Fluxo obrigatorio do agente
 
 ```

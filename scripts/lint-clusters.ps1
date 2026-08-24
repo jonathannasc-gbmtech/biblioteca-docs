@@ -7,19 +7,24 @@
 #     nenhum (foi assim que 8 resumos sumiram silenciosamente, ver regularizacao
 #     de 2026-08-14). Se precisar de mais de um resumo pro mesmo cluster+repo,
 #     mesclar num so ou marcar os extras `status: superseded`/`archived`.
+param([array]$ParsedDocs)
 . (Join-Path $PSScriptRoot 'lib-doc.ps1')
 $root = Get-LibRoot
-$files = Get-DocumentFiles $root
+# -ParsedDocs vem de sync-all.ps1 (parse compartilhado, ver Get-ParsedDocs
+# em lib-doc.ps1); sem ele (rodando este script solo), parseia por conta
+# propria - mesmo resultado, so' sem o reaproveitamento entre scripts.
+$parsedDocs = if ($ParsedDocs) { $ParsedDocs } else { Get-ParsedDocs $root }
 
-$docs = @()
-foreach ($f in $files) {
-    $p = Parse-Frontmatter ([IO.File]::ReadAllText($f.FullName))
+$allDocs = @()
+foreach ($d in $parsedDocs) {
+    $f = $d.File
+    $p = $d.Parsed
     if (-not $p -or -not $p.Meta['number']) { continue }
     $task = Clean-Field $(if ($p.Meta['task']) { $p.Meta['task'] } else { 'general' })
-    if ($task -ne 'general') { continue }
     $rel = $f.FullName.Substring($root.Length + 1) -replace '\\', '/'
-    $docs += [PSCustomObject]@{
+    $allDocs += [PSCustomObject]@{
         Path    = $rel
+        Task    = $task
         Cluster = Clean-Field $p.Meta['cluster']
         Related = @($p.Meta['related'] | Where-Object { $_ })
         Type    = Clean-Field $p.Meta['type']
@@ -27,6 +32,9 @@ foreach ($f in $files) {
         Status  = Clean-Field $p.Meta['status']
     }
 }
+# Checks (a)/(b)/(c) abaixo sao especificas de task: general - checks (d)
+# em diante usam $allDocs (todo doc, numerico ou general).
+$docs = @($allDocs | Where-Object { $_.Task -eq 'general' })
 
 $errors = @()
 $warnings = @()
@@ -70,6 +78,28 @@ foreach ($g in $porClusterRepo) {
     if ($g.Count -gt 1) {
         $paths = ($g.Group | ForEach-Object { $_.Path }) -join ', '
         $errors += "mais de um resumo ativo no mesmo cluster+repo [$($g.Name)]: $paths -- mesclar num so ou marcar os extras status: superseded/archived"
+    }
+}
+
+# (d) related: apontando pra arquivo que nao existe mais (renome/delete sem
+# atualizar o link de volta - achado real: resumo/backend/907 e 914 ainda
+# referenciavam o nome antigo do handover-tecnico depois da migracao
+# pseudo_task). So aviso, nao bloqueia - referencia morta nao impede o build.
+# IMPORTANTE: existencia e' checada contra TODO arquivo devolvido por
+# Get-DocumentFiles, nao so' $allDocs (que exige `number:` no frontmatter) -
+# `reqs/*.md` nao tem frontmatter por convencao (ver 01-regras-biblioteca.md)
+# e ficava sempre marcado como "quebrado" mesmo quando o arquivo existia
+# (bug real, achado ao criar reqs/auditoria-performance-biblioteca.md).
+$allByPath = @{}
+foreach ($d in $parsedDocs) {
+    $rel = $d.File.FullName.Substring($root.Length + 1) -replace '\\', '/'
+    $allByPath[$rel] = $true
+}
+foreach ($d in $allDocs) {
+    foreach ($r in $d.Related) {
+        if (-not $allByPath.ContainsKey($r)) {
+            $warnings += "$($d.Path) - related quebrado, arquivo nao existe: $r"
+        }
     }
 }
 

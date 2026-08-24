@@ -7,6 +7,7 @@
 #
 # Favorito ("estrela") e puramente client-side (localStorage) - nao precisa
 # de comando/skill, e' so uma preferencia de UI, sem logica de git.
+param([array]$ParsedDocs)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -16,7 +17,10 @@ $libScript = Join-Path $libRoot 'scripts\lib-doc.ps1'
 . $libScript
 
 $root = Get-LibRoot
-$files = Get-DocumentFiles $root
+# -ParsedDocs vem de sync-all.ps1 (parse compartilhado); sem ele (rodando
+# este script solo, como faz task-hub-complete/qa), parseia por conta
+# propria - ver lint-clusters.ps1.
+$parsedDocs = if ($ParsedDocs) { $ParsedDocs } else { Get-ParsedDocs $root }
 $typeOrder = @{ 'task-code' = 0; 'task-planning' = 1; 'testes' = 2; 'handover-tecnico' = 3 }
 $activeStatuses = @('draft', 'in_progress')
 $bibConfig = Get-BibliotecaConfig
@@ -297,9 +301,9 @@ function Get-RelatedTasksHtml([PSCustomObject]$card) {
 }
 
 $all = @()
-foreach ($f in $files) {
-    $raw = [IO.File]::ReadAllText($f.FullName)
-    $p = Parse-Frontmatter $raw
+foreach ($d in $parsedDocs) {
+    $f = $d.File
+    $p = $d.Parsed
     if (-not $p -or -not $p.Meta['number']) { continue }
     $status = Clean-Field $(if ($p.Meta['status']) { $p.Meta['status'] } else { 'draft' })
     $task = Clean-Field $(if ($p.Meta['task']) { $p.Meta['task'] } else { 'general' })
@@ -371,6 +375,12 @@ $knownRepos = @($knownRepos | Where-Object { $_ -match '^[A-Za-z0-9._-]+$' } |
     ForEach-Object { Get-RepoSortKey $_ } |
     Sort-Object Bucket, DomainRank, Domain, SubOrder, Name |
     ForEach-Object { $_.Name })
+# "Biblioteca" nao mora em reposBasePath (e' a raiz do proprio repo da
+# Biblioteca, pasta irma de reposBasePath) - por isso nunca aparecia nesta
+# lista (que so' varre reposBasePath + repo: dos docs). Forcado primeiro na
+# lista (nao passa por Get-RepoSortKey) pra abrir o Claude direto nela pelo
+# seletor "Abrir Claude" - ver caso especial de path em __LIB_ROOT_PATH__.
+$knownRepos = @('Biblioteca') + @($knownRepos | Where-Object { $_ -ne 'Biblioteca' })
 $knownReposOptionsHtml = ($knownRepos | ForEach-Object { "<option value=`"$(Esc $_)`">" }) -join "`n"
 
 # Regex de link de PR no corpo - mesma usada pelo Get-Signals (linha ~38),
@@ -1636,10 +1646,18 @@ $faviconLink
   .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-faint); pointer-events: none; display: flex; }
   #search {
     width: 100%; max-width: 480px; background: var(--input-bg); border: 1px solid var(--card-border);
-    color: var(--text); border-radius: 8px; padding: 10px 14px 10px 34px; font-size: 0.9rem;
+    color: var(--text); border-radius: 8px; padding: 10px 30px 10px 34px; font-size: 0.9rem;
   }
   #search:focus-visible { border-color: var(--gold); }
   #search::placeholder { color: var(--text-faint); }
+  .clear-btn {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    width: 18px; height: 18px; border: none; background: none; color: var(--text-faint);
+    cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; display: none;
+    align-items: center; justify-content: center; border-radius: 50%;
+  }
+  .clear-btn:hover { color: var(--gold-bright); }
+  .clear-btn.visible { display: flex; }
   h2 {
     font-size: 1rem; color: var(--gold-bright); text-transform: uppercase; letter-spacing: 0.08em;
     border-bottom: 1px solid var(--card-border); padding-bottom: 8px; margin-top: 32px;
@@ -1756,9 +1774,10 @@ $faviconLink
   }
   .claude-btn:hover { filter: brightness(1.2); }
   .quick-open { display: flex; align-items: center; gap: 6px; margin: 0; flex: 0 0 auto; }
+  .quick-repo-wrap { position: relative; display: flex; }
   .quick-open input {
     background: var(--input-bg); border: 1px solid var(--card-border); color: var(--text);
-    border-radius: 8px; padding: 10px 14px; font-size: 0.9rem; width: 170px;
+    border-radius: 8px; padding: 10px 30px 10px 14px; font-size: 0.9rem; width: 170px;
   }
   .quick-open input:focus-visible { border-color: var(--gold); }
   .empty { color: var(--text-faint); font-size: 0.85rem; }
@@ -1805,7 +1824,10 @@ if (quickBtn) {
     var repo = document.getElementById('quick-repo').value.trim();
     // Sem repo escolhido -> abre solto na pasta que contem todos os repos
     // (reposBasePath), em vez de nao fazer nada.
-    var targetPath = repo ? ('__REPOS_BASE_PATH__\\' + repo) : '__REPOS_BASE_PATH__';
+    // "Biblioteca" e' caso especial - a raiz do proprio repo, nao uma pasta
+    // dentro de reposBasePath (ver __LIB_ROOT_PATH__).
+    var targetPath = repo.toLowerCase() === 'biblioteca' ? '__LIB_ROOT_PATH__' :
+      (repo ? ('__REPOS_BASE_PATH__\\' + repo) : '__REPOS_BASE_PATH__');
     var cmd = 'powershell -NoProfile -Command "cd \'' + targetPath + '\'; claude"';
     // -run: aperta Enter sozinho - so abre uma janela solta do Claude, sem
     // disparar nenhuma skill nem gravar nada, diferente dos outros botoes.
@@ -1927,6 +1949,24 @@ function applyFilters() {
     }
   });
 }
+// Botao "x" de limpar - so' aparece com texto digitado, some vazio.
+// Limpa o campo, foca de volta e reaplica o filtro na hora (o listener
+// 'input' normal do campo nao dispara em mudanca via JS).
+function wireClearBtn(input, btn) {
+  if (!input || !btn) { return; }
+  function sync() { btn.classList.toggle('visible', input.value.length > 0); }
+  input.addEventListener('input', sync);
+  btn.addEventListener('click', function () {
+    input.value = '';
+    sync();
+    applyFilters();
+    input.focus();
+  });
+  sync();
+}
+wireClearBtn(search, document.getElementById('search-clear'));
+wireClearBtn(quickRepoFilter, document.getElementById('quick-repo-clear'));
+
 if (search) { search.addEventListener('input', applyFilters); }
 if (quickRepoFilter) { quickRepoFilter.addEventListener('input', applyFilters); }
 
@@ -1991,11 +2031,15 @@ setInterval(function () { saveReloadState(); location.reload(); }, LIVE_RELOAD_M
 # mesmo mecanismo biblioteca-cmd:/clipboard dos outros botoes.
 $quickOpenHtml = ''
 $reposBasePathJs = if ($bibConfig.reposBasePath) { $bibConfig.reposBasePath.Replace('\', '\\') } else { '' }
-$foot = $foot.Replace('__REPOS_BASE_PATH__', $reposBasePathJs)
+$libRootJs = $root.Replace('\', '\\')
+$foot = $foot.Replace('__REPOS_BASE_PATH__', $reposBasePathJs).Replace('__LIB_ROOT_PATH__', $libRootJs)
 if ($bibConfig.reposBasePath) {
     $quickOpenHtml = @"
 <div class="quick-open">
-  <input type="text" id="quick-repo" list="quick-repos" placeholder="Repositorio..." autocomplete="off">
+  <div class="quick-repo-wrap">
+    <input type="text" id="quick-repo" list="quick-repos" placeholder="Repositorio..." autocomplete="off">
+    <button type="button" class="clear-btn" id="quick-repo-clear" aria-label="Limpar repositorio" title="Limpar">&times;</button>
+  </div>
   <datalist id="quick-repos">
 $knownReposOptionsHtml
   </datalist>
@@ -2017,6 +2061,7 @@ $body = @"
   <div class="search-wrap">
     <span class="search-icon">$searchIcon</span>
     <input id="search" type="text" placeholder="Buscar por task, repo ou descricao..." autocomplete="off">
+    <button type="button" class="clear-btn" id="search-clear" aria-label="Limpar busca" title="Limpar">&times;</button>
   </div>
   $quickOpenHtml
   <a class="copy-btn primary-link" href="nova-task.html" target="_blank">+ Nova Task</a>

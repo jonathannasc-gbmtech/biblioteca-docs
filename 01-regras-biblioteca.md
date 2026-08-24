@@ -93,14 +93,11 @@ Exceção: `planos/` usa `{yyyy-MM-dd_HHmmss}-{nome-original-do-plano}.md` — n
 
 ## Fluxo obrigatório do agente (criar um doc novo)
 
-```
-1. Ler INDEX.md (campo "Próximo número") — não editar
-2. Copiar o template do tipo em _templates/
-3. Preencher APENAS o frontmatter YAML + corpo (H1 em diante)
-4. NÃO escrever a tabela de metadados — é gerada pelo script
-5. Salvar em {tipo}/frontend/ ou {tipo}/backend/, conforme repo:
-6. Rodar scripts/sync-all.ps1
-```
+Passo a passo completo em `~/.claude/skills/controle-documentacao/SKILL.md`
+("Fluxo obrigatorio do agente") — não duplicado aqui pra não divergir das
+duas versões quando o fluxo mudar. Resumo pra humano: ler `INDEX.md` pro
+próximo número, copiar o template certo, preencher só YAML+corpo, salvar
+na pasta certa, rodar `sync-all.ps1`.
 
 ---
 
