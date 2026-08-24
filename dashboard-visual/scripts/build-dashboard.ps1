@@ -15,6 +15,7 @@ $hubRoot = Split-Path $PSScriptRoot -Parent
 $libRoot = Split-Path $hubRoot -Parent
 $libScript = Join-Path $libRoot 'scripts\lib-doc.ps1'
 . $libScript
+. (Join-Path $PSScriptRoot 'dashboard-lib.ps1')
 
 $root = Get-LibRoot
 # -ParsedDocs vem de sync-all.ps1 (parse compartilhado); sem ele (rodando
@@ -25,11 +26,6 @@ $typeOrder = @{ 'task-code' = 0; 'task-planning' = 1; 'testes' = 2; 'handover-te
 $activeStatuses = @('draft', 'in_progress')
 $bibConfig = Get-BibliotecaConfig
 $azureBase = $bibConfig.azureOrgUrl
-
-function Esc([string]$s) {
-    if ($null -eq $s) { return '' }
-    return $s.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;').Replace('"', '&quot;')
-}
 
 $githubIcon = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.02 1.93-.02 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>'
 $linkIcon = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M4.72 3.5a2.25 2.25 0 000 4.5h1.5a.75.75 0 010 1.5h-1.5a3.75 3.75 0 010-7.5h1.5a.75.75 0 010 1.5h-1.5zm6.56 0h-1.5a.75.75 0 000 1.5h1.5a2.25 2.25 0 010 4.5h-1.5a.75.75 0 000 1.5h1.5a3.75 3.75 0 000-7.5zM5.5 8a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5h-3.5A.75.75 0 015.5 8z"/></svg>'
@@ -189,46 +185,6 @@ function Get-LayerStatusHtml([PSCustomObject]$card) {
     return "<div class=`"position layer-status`">$rows</div>"
 }
 
-function Get-Signals($docs) {
-    $prLinks = New-Object System.Collections.Generic.List[string]
-    foreach ($d in $docs) {
-        foreach ($m in [regex]::Matches($d.Body, 'https?://github\.com/\S*?/pull/\d+')) {
-            if (-not $prLinks.Contains($m.Value)) { $prLinks.Add($m.Value) }
-        }
-    }
-    return [PSCustomObject]@{
-        PRs = @($prLinks | Select-Object -First 10)
-    }
-}
-
-# Comandos copiaveis de um card - usado tanto pelos botoes inline do card
-# quanto pela caixa de acoes da pagina de resumo, pra nao duplicar as
-# strings de comando em dois lugares.
-# Prefixo do protocolo customizado registrado por register-protocol.ps1 -
-# um link biblioteca-cmd:<comando url-encoded> abre um cmd novo com o
-# comando ja digitado (launch-command.vbs), sem apertar Enter. Some sem
-# erro em navegador/maquina sem o protocolo registrado - so o clipboard
-# (fallback de sempre) continua funcionando.
-function Get-LaunchUri([string]$cmdText, [switch]$AutoRun) {
-    $scheme = if ($AutoRun) { 'biblioteca-cmd-run:' } else { 'biblioteca-cmd:' }
-    return $scheme + [Uri]::EscapeDataString($cmdText)
-}
-
-function Get-CardCommands([PSCustomObject]$card) {
-    # Envolvido em "powershell -NoProfile -Command" pra funcionar colado tanto
-    # no cmd.exe (onde ; nao separa comandos, quebrava o cd) quanto no
-    # PowerShell - independe do shell padrao do usuario.
-    $base = "cd '$hubRoot'"
-    $cmds = New-Object System.Collections.Generic.List[PSCustomObject]
-    if ($card.Active) {
-        $cmd = "powershell -NoProfile -Command `"$base; claude 'retomar task $($card.Task) no repo $($card.Repo)'`""
-        $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = (Get-LaunchUri $cmd -AutoRun) })
-    }
-    $qaCmd = "powershell -NoProfile -Command `"$base; claude 'ajustar qa task $($card.Task) no repo $($card.Repo)'`""
-    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = (Get-LaunchUri $qaCmd -AutoRun) })
-    return $cmds
-}
-
 # Pills de links externos (Azure DevOps + PR do GitHub, com cor por estado
 # real - aberto/mergeado/rejeitado). Compartilhada entre o card da grade e a
 # pagina de resumo, pra nao duplicar a logica de cor em dois lugares.
@@ -339,36 +295,6 @@ if ($bibConfig.reposBasePath -and (Test-Path $bibConfig.reposBasePath)) {
     foreach ($dir in (Get-ChildItem -Path $bibConfig.reposBasePath -Directory -ErrorAction SilentlyContinue)) {
         if (-not $knownRepos.Contains($dir.Name)) { $knownRepos.Add($dir.Name) }
     }
-}
-
-# Ordenacao logica (nao alfabetica pura): backend + frontend/mfe/mobile do
-# mesmo dominio ficam juntos (settings-backend do lado de mfe-settings),
-# dominios sem par (migrations, geral) ficam depois dos pares, e repos de
-# skills pessoais (nao-projeto) sempre por ultimo. Descarta entradas
-# malformadas (valor com virgula/espaco vindo de frontmatter com 2 repos
-# no mesmo campo por engano - nao e' pasta de verdade).
-$domainAliases = @{ 'schedule' = 'scheduling' }
-$domainRank = @{ 'backoffice' = 0; 'collector' = 1; 'railroad' = 2; 'road' = 3; 'scheduling' = 4; 'settings' = 5; 'stock' = 6 }
-$personalRepos = @('gbm-ai-skills', 'jow-ai-skills', 'ponytail')
-
-function Get-RepoSortKey([string]$repo) {
-    if ($personalRepos -contains $repo.ToLowerInvariant()) {
-        return [PSCustomObject]@{ Bucket = 2; DomainRank = 99; Domain = ''; SubOrder = 0; Name = $repo }
-    }
-    $domain = $null
-    $subOrder = 3
-    if ($repo -match '^gbm-app-(.+)-backend$') { $domain = $Matches[1]; $subOrder = 0 }
-    elseif ($repo -match '^gbm-mfe-(.+)$') {
-        $raw = $Matches[1]
-        $domain = if ($domainAliases.ContainsKey($raw)) { $domainAliases[$raw] } else { $raw }
-        $subOrder = 1
-    } elseif ($repo -match '^gbm-mobile-(.+)$') { $domain = $Matches[1]; $subOrder = 2 }
-
-    if ($domain) {
-        $rank = if ($domainRank.ContainsKey($domain)) { $domainRank[$domain] } else { 50 }
-        return [PSCustomObject]@{ Bucket = 0; DomainRank = $rank; Domain = $domain; SubOrder = $subOrder; Name = $repo }
-    }
-    return [PSCustomObject]@{ Bucket = 1; DomainRank = 0; Domain = ''; SubOrder = 0; Name = $repo }
 }
 
 $knownRepos = @($knownRepos | Where-Object { $_ -match '^[A-Za-z0-9._-]+$' } |
