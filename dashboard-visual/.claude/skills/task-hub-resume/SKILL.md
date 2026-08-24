@@ -100,8 +100,8 @@ precisar de julgamento.
 6. **Reportar:** branch atual, o que foi restaurado (stash aplicado ou
    nao) e o resumo da task - pronto pra continuar trabalhando.
 7. **Manter o doc `resumo`:** ver skill `controle-documentacao` (tipo
-   `resumo`, um por task+repo). Se nao existir `resumo/{camada}/NN-resumo-
-   {slug}-{taskId}.md` pra essa task+repo, criar agora. Atualizar as
+   `resumo`, um por task+repo). Se nao existir `resumo/{camada}/{taskId}-
+   {slug}.md` pra essa task+repo, criar agora. Atualizar as
    secoes **Status atual** e **O que falta** com o que foi levantado no
    passo 5 - bullets factuais, sem prosa polida (esse doc e' fonte de
    dado pro `dashboard.html`, nao leitura direta). Gravar tambem o campo

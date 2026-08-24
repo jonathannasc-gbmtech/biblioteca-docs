@@ -7,13 +7,13 @@ task: general
 function: Regras da Biblioteca
 stub: —
 cluster: Regras da Biblioteca
-updated: 2026-08-14
+updated: 2026-08-24
 author: —
 ---
 # Regras da Biblioteca
 
 <!-- badge:auto -->
-✅ **Concluido** | `geral` | 14/08/2026
+✅ **Concluido** | `geral` | 24/08/2026
 <!-- /badge:auto -->
 
 Referência humana — resumo condensado. Agentes seguem a versão operacional
@@ -69,7 +69,21 @@ Biblioteca/
 
 ## Nomenclatura
 
-`{NN}-{tipo}-{slug}-{taskId|general}.md` — ex. `27-testes-101034-aurora-sheet.md`.
+Sem número sequencial no nome do arquivo (`number:` no frontmatter já
+cobre isso — ver "Frontmatter" abaixo). `task-code`/`task-planning`/
+`resumo` não repetem o tipo no nome; `testes`/`handover-tecnico` levam o
+tipo no **final** do nome (vocabulário mais genérico, vale deixar
+explícito):
+
+```
+task-code/task-planning/resumo:  {taskId|pseudo_task|general}-{slug}.md
+testes:                          {taskId|pseudo_task|general}-{slug}-testes.md
+handover-tecnico:                {taskId|pseudo_task|general}-{slug}-handover-tecnico.md
+```
+
+Ex.: `101034-terminal-side-sheet.md` (task-code), `101034-aurora-sheet-testes.md`
+(testes), `901-checkpoint-melhorias-biblioteca-handover-tecnico.md`
+(handover-tecnico, `task: general` com `pseudo_task: 901`).
 
 Exceção: `reqs/` usa `{taskId}-{slug}.md` — sem número sequencial, sem frontmatter obrigatório (é cópia de referência, não doc de ciclo de vida).
 
@@ -99,6 +113,7 @@ Exceção: `planos/` usa `{yyyy-MM-dd_HHmmss}-{nome-original-do-plano}.md` — n
 | `superseded` | Substituído por outro doc — `related:` aponta pro novo |
 | `archived` | Histórico encerrado sem substituto, ou seção antiga dentro de um planning consolidado |
 | `cluster:` | Nome curto de agrupamento pra tasks `task: general` — vira o título do card no dashboard E a chave de agrupamento (em vez de "Geral" solto). Mesmo texto em todo doc do mesmo assunto |
+| `pseudo_task:` | Opcional, só pra `task: general` — número curto sequencial na faixa **900+** (contador próprio, separado do `number:` global; ver `INDEX.md`, campo "Próximo pseudo_task") pra achar o card pela busca do dashboard também por número, não só pelo nome do `cluster`. Aparece no título do card como `Cluster (#N)`. Faixa 900+ desde 2026-08-24 — nunca colide visualmente com task id real (todo id GBM começa com 1, ex. `104691`) e filtra só digitando "9" na busca |
 | `pr_pending` / `pr_merged` / `pr_rejected` | URL do PR — preenchidos por um sweep automático (`gh pr view`) rodado pelo `build-dashboard.ps1`, não à mão. Ao mergear, o sweep também fecha `status: completed` sozinho |
 | `plan_active` | Só em `task-planning` com múltiplos planos — indica qual seção está em execução |
 
@@ -135,10 +150,11 @@ Campos base de todos os 5 templates em `_templates/`:
 number, type, status, repo, task, function, stub, related, updated, author
 ```
 
-`task-planning.md` soma `plan_active`. `cluster` e `pr_pending`/`pr_merged`/
-`pr_rejected` **não** vêm nos templates — são exceções aplicadas depois
-(cluster na hora de rotular uma task `general`; os `pr_*` só são escritos
-pelo sweep automático, nunca à mão).
+`task-planning.md` soma `plan_active`. `cluster`, `pseudo_task` e
+`pr_pending`/`pr_merged`/`pr_rejected` **não** vêm nos templates — são
+exceções aplicadas depois (cluster + pseudo_task na hora de rotular uma
+task `general`; os `pr_*` só são escritos pelo sweep automático, nunca à
+mão).
 
 ---
 

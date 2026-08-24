@@ -50,9 +50,13 @@ se o resumo não tiver a resposta.
 
 **Camada:** `repo: meu-app-frontend` → `.../frontend/` · `repo: meu-app-backend` → `.../backend/`
 
-Exemplo: `testes/frontend/27-testes-101034-aurora-sheet.md`
+Exemplo: `testes/frontend/101034-aurora-sheet-testes.md`
 
-**Nome:** `{NN}-{tipo}-{slug}-{taskId|general}.md`
+**Nome:** sem numero sequencial (o `number:` do frontmatter ja cobre
+isso). `task-code`/`task-planning`/`resumo` nao repetem o tipo no nome;
+`testes`/`handover-tecnico` levam o tipo no final:
+`{taskId|pseudo_task|general}-{slug}.md` (task-code/task-planning/resumo)
+ou `{taskId|pseudo_task|general}-{slug}-{tipo}.md` (testes/handover-tecnico).
 
 Exceção: `reqs` usa `{taskId}-{slug}.md`, sem prefixo numerico e sem YAML frontmatter obrigatorio — e copia de referencia, nao doc de ciclo de vida. Um unico arquivo por task, com secoes:
 
@@ -116,11 +120,12 @@ branch: —              # opcional, so no doc `resumo` — nome real da branch 
 function: Resumo de uma linha para o INDEX
 stub: —
 cluster: —             # opcional, so pra `task: general` — nome curto (2-4 palavras) que o dashboard usa como titulo do card no lugar de "Geral" E como chave de agrupamento (substitui o fallback por `related`/path — ver _ferramenta/dashboard-visual/CLAUDE.md). Manter o MESMO texto em todo doc do mesmo assunto — e' isso que agrupa os docs no mesmo card.
+pseudo_task: —         # opcional, so pra `task: general` — numero curto e sequencial na faixa 900+ (contador proprio, separado do `number:` global; ver INDEX.md campo "Proximo pseudo_task") pra dar uma forma facil de achar por busca no dashboard alem do nome do cluster - a faixa 900+ nunca colide visualmente com task id real (todo id GBM comeca com 1) e filtra so digitando "9" na busca. So atribuir quando quem cria o doc realmente quer esse atalho numerico (nem todo `task: general` precisa).
 pr_pending: —          # opcional — url do PR quando aberto e ainda sem confirmacao de merge (ver _ferramenta/dashboard-visual/CLAUDE.md, sweep automatico)
 plan_active: plano-1          # so task-planning com multiplos planos
 related:
-  - task-code/frontend/23-task-code-101034-terminal-side-sheet.md
-  - testes/frontend/27-testes-101034-aurora-sheet.md
+  - task-code/frontend/101034-terminal-side-sheet.md
+  - testes/frontend/101034-aurora-sheet-testes.md
 updated: YYYY-MM-DD
 author: —              # preencher com biblioteca.config.json > author
 ---
@@ -191,3 +196,8 @@ Se voce tiver skills dedicadas a rodar/registrar testes (unitario, manual) → g
 ## Novo documento — proximo numero
 
 Consultar `INDEX.md` campo **Proximo numero**. Usar esse valor no `number:` do YAML.
+
+Se for `task: general` e o assunto merecer um atalho numerico pra busca
+(ver `pseudo_task` no bloco de Frontmatter acima), consultar tambem o
+campo **Proximo pseudo_task** do mesmo `INDEX.md` — e' um contador
+separado do `number:`, nao confundir os dois.

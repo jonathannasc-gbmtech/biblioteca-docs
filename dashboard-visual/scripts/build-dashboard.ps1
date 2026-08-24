@@ -316,6 +316,7 @@ foreach ($f in $files) {
         Related  = $p.Meta['related']
         Branch    = Clean-Field $p.Meta['branch']
         Cluster   = Clean-Field $p.Meta['cluster']
+        PseudoTask = Clean-Field $p.Meta['pseudo_task']
         PrPending  = Clean-Field $p.Meta['pr_pending']
         PrMerged   = Clean-Field $p.Meta['pr_merged']
         PrRejected = Clean-Field $p.Meta['pr_rejected']
@@ -517,11 +518,15 @@ foreach ($g in $groups) {
     # qualquer doc do grupo com `cluster:` no frontmatter vira o titulo do card
     # - e agora tambem a propria chave de agrupamento, ver Group-Object acima)
     $cardCluster = ($docs + $resumoDoc | Where-Object { $_ -and $_.Cluster } | Select-Object -First 1).Cluster
+    # pseudo_task e' opcional mesmo em cluster "general" - so os que quiserem
+    # um numero curto pra achar por busca (ver 01-regras-biblioteca.md).
+    $cardPseudoTask = ($docs + $resumoDoc | Where-Object { $_ -and $_.PseudoTask } | Select-Object -First 1).PseudoTask
     $cards += [PSCustomObject]@{
         Task      = $rep.Task
         Repo      = $rep.Repo
         Function  = $rep.Function
         Cluster   = $cardCluster
+        PseudoTask = $cardPseudoTask
         Active    = $isActive
         Updated   = $latest
         UpdatedTime = $latestTime
@@ -635,7 +640,11 @@ function Build-SummaryHtml([PSCustomObject]$card) {
         "<section class=`"resumo-section`"><h2>$(Esc $name)</h2>$contentHtml</section>"
     }) -join "`n"
 
-    $taskLabel = if ($card.Cluster) { $card.Cluster } elseif ($card.Task -eq 'general') { 'Geral' } else { "Task $($card.Task)" }
+    # pseudo_task aparece entre parenteses no titulo pra dar um numero curto
+    # e buscavel a task "general" (senao so acha por nome do cluster, ver
+    # 01-regras-biblioteca.md) - mesma ideia de "Task N", mas sem ser uma
+    # task numerica de verdade.
+    $taskLabel = if ($card.Cluster) { if ($card.PseudoTask) { "$($card.Cluster) (#$($card.PseudoTask))" } else { $card.Cluster } } elseif ($card.Task -eq 'general') { if ($card.PseudoTask) { "Geral (#$($card.PseudoTask))" } else { 'Geral' } } else { "Task $($card.Task)" }
     $extLinksHtml = Get-ExtLinksHtml $card
 
     # Testes - so os CONCLUIDOS, so o link (sem detalhe de resultado aqui,
@@ -824,7 +833,11 @@ function Build-Card([PSCustomObject]$card) {
     $btns = (Get-CardCommands $card | ForEach-Object { "<a class=`"$($_.Class)`" href=`"$(Esc $_.Uri)`" data-cmd=`"$(Esc $_.Cmd)`">$(Esc $_.Label)</a>" }) -join ''
     $btnsHtml = "<div class=`"btns`">$btns</div>"
 
-    $taskLabel = if ($card.Cluster) { $card.Cluster } elseif ($card.Task -eq 'general') { 'Geral' } else { "Task $($card.Task)" }
+    # pseudo_task aparece entre parenteses no titulo pra dar um numero curto
+    # e buscavel a task "general" (senao so acha por nome do cluster, ver
+    # 01-regras-biblioteca.md) - mesma ideia de "Task N", mas sem ser uma
+    # task numerica de verdade.
+    $taskLabel = if ($card.Cluster) { if ($card.PseudoTask) { "$($card.Cluster) (#$($card.PseudoTask))" } else { $card.Cluster } } elseif ($card.Task -eq 'general') { if ($card.PseudoTask) { "Geral (#$($card.PseudoTask))" } else { 'Geral' } } else { "Task $($card.Task)" }
     $searchBlob = Esc(("$taskLabel $($card.Repo) $($card.Function)").ToLowerInvariant())
     $repoLower = Esc(($card.Repo).ToLowerInvariant())
     $cardId = Esc($card.RepPath)
@@ -1412,7 +1425,7 @@ function Build-PendenciasHtml() {
 
     $rows = ($pendentes | ForEach-Object {
         $c = $_
-        $taskLabel = if ($c.Task -match '^\d+$') { "#$($c.Task)" } elseif ($c.Cluster) { $c.Cluster } else { $c.Task }
+        $taskLabel = if ($c.Task -match '^\d+$') { "#$($c.Task)" } elseif ($c.Cluster) { if ($c.PseudoTask) { "$($c.Cluster) (#$($c.PseudoTask))" } else { $c.Cluster } } else { $c.Task }
         $desc = if ($c.Function) { $c.Function } else { '(sem descricao)' }
         # mesma cor que o resto da Biblioteca ja associa a cada status (StatusEmoji:
         # draft=circulo branco, in_progress=circulo azul, lib-doc.ps1) - so nao existia
