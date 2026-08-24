@@ -213,7 +213,7 @@ function Build-RelatedSection($meta) {
 
 function Serialize-Frontmatter($meta) {
     $lines = @('---')
-    $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'stub', 'cluster', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
+    $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'stub', 'cluster', 'pseudo_task', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
     foreach ($key in $order) {
         if (-not $meta.ContainsKey($key)) { continue }
         if ($key -eq 'related') {
@@ -289,6 +289,22 @@ function Get-DocumentFiles([string]$root) {
             $_.Name -notin @('INDEX.md', 'README.md', 'CATALOGO.md') -and
             $_.DirectoryName -notmatch '[\\/]scripts[\\/]'
         }
+}
+
+# Parse uma unica vez, compartilhado entre lint-clusters/build-index/
+# build-dashboard via sync-all.ps1 (cada um antes fazia seu proprio
+# Get-DocumentFiles + Parse-Frontmatter por arquivo - 4 varreduras
+# completas da Biblioteca por sync-all, agora 1). So chamar isso DEPOIS
+# de sync-header.ps1 rodar (ele e' quem re-grava os arquivos - cache
+# calculado antes ficaria desatualizado).
+function Get-ParsedDocs([string]$root) {
+    $files = Get-DocumentFiles $root
+    $docs = @()
+    foreach ($f in $files) {
+        $parsed = Parse-Frontmatter ([IO.File]::ReadAllText($f.FullName))
+        $docs += [PSCustomObject]@{ File = $f; Parsed = $parsed }
+    }
+    return $docs
 }
 
 function Get-NextNumber($docs) {

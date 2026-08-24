@@ -1,12 +1,26 @@
 # Gera INDEX.md a partir do frontmatter de todos os documentos
+param([array]$ParsedDocs)
 . (Join-Path $PSScriptRoot 'lib-doc.ps1')
 $root = Get-LibRoot
-$files = Get-DocumentFiles $root
+# -ParsedDocs vem de sync-all.ps1 (parse compartilhado); sem ele, parseia
+# por conta propria (rodando este script solo) - ver lint-clusters.ps1.
+$parsedDocs = if ($ParsedDocs) { $ParsedDocs } else { Get-ParsedDocs $root }
 $rows = @()
+$maxNum = 1
+$maxPseudoTask = 900
 
-foreach ($f in $files) {
-    $p = Parse-Frontmatter ([IO.File]::ReadAllText($f.FullName))
+foreach ($d in $parsedDocs) {
+    $f = $d.File
+    $p = $d.Parsed
     if (-not $p -or -not $p.Meta['number']) { continue }
+    if ($p.Meta['number'] -match '^\d+$') {
+        $n = [int]$p.Meta['number']
+        if ($n -gt $maxNum) { $maxNum = $n }
+    }
+    if ($p.Meta['pseudo_task'] -match '^\d+$') {
+        $n = [int]$p.Meta['pseudo_task']
+        if ($n -gt $maxPseudoTask) { $maxPseudoTask = $n }
+    }
     $rel = $f.FullName.Substring($root.Length + 1) -replace '\\', '/'
     $num = $p.Meta['number'].PadLeft(2, '0')
     $status = Clean-Field $(if ($p.Meta['status']) { $p.Meta['status'] } else { 'draft' })
@@ -18,9 +32,8 @@ foreach ($f in $files) {
         Line = "| $num | [``$rel``]($rel) | $statusLabel | $($p.Meta['repo']) | $($p.Meta['task']) | $($p.Meta['function']) |"
     }
 }
-
-$next = Get-NextNumber $files
-$nextPseudoTask = Get-NextPseudoTask $files
+$next = $maxNum + 1
+$nextPseudoTask = $maxPseudoTask + 1
 $today = Get-Date -Format 'dd/MM/yyyy'
 
 $tableHeader = @(
