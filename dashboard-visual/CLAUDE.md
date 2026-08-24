@@ -120,18 +120,24 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   automática — o usuário roda esse script manualmente quando quiser
   habilitar), ambos entregues pro mesmo `scripts/launch-command.vbs`:
   `biblioteca-cmd:` abre um `cmd` novo e **digita o comando sem apertar
-  Enter** (usuário revisa e confirma manualmente) — hoje só usado por
-  **Ajustes QA**, ação mais sensível (reabre task já concluída/mergeada).
+  Enter** (usuário revisa e confirma manualmente).
   `biblioteca-cmd-run:` digita **e aperta Enter sozinho** — usado por
-  **Retomar task**, "+ Nova Task" e o botão "Abrir Claude" (header): as
-  duas primeiras já têm confirmação embutida no próprio fluxo (a skill
-  `task-hub-resume` relê os docs antes de agir; o prompt do Nova Task
-  pede confirmação objetiva do work item antes de gravar qualquer coisa),
-  então a trava extra de "revisar no terminal antes de apertar Enter"
-  virou fricção redundante — decisão do usuário, 2026-08-21. "Abrir
-  Claude" nunca teve skill nem grava nada, sempre foi auto-Enter. Sem o
-  protocolo registrado, o link simplesmente não faz nada além do
-  clipboard de sempre — degrada bem.
+  **todos** os botões que abrem o Claude (`Retomar task`, `Reabrir p/ QA`,
+  "+ Nova Task" e o botão "Abrir Claude" do header): a confirmação embutida
+  no próprio fluxo de cada um (a skill `task-hub-resume`/`task-hub-qa` relê
+  os docs antes de agir; o prompt do Nova Task pede confirmação objetiva do
+  work item antes de gravar qualquer coisa) tornou a trava extra de
+  "revisar no terminal antes de apertar Enter" fricção redundante mesmo pro
+  `Reabrir p/ QA` — decisão do usuário, 2026-08-24 (revoga a decisão
+  parcial de 2026-08-21, que ainda mantinha esse botão manual por ser mais
+  sensível). "Abrir Claude" nunca teve skill nem grava nada, sempre foi
+  auto-Enter. **`biblioteca-cmd:` (sem `-run`) ficou sem nenhum uso** nos
+  botões do dashboard depois dessa mudança — a função `Get-LaunchUri` e o
+  registro do protocolo em `register-protocol.ps1` continuam existindo
+  (infra genérica, não vale remover só por estar sem chamador agora), mas
+  nenhum botão passa `-AutoRun:$false` hoje. Sem o protocolo `-run`
+  registrado, o link simplesmente não faz nada além do clipboard de
+  sempre — degrada bem.
 - `nova-task.html` — botão **+ Nova Task** do
   header abre essa página numa aba nova (não pergunta nada por chat de
   saída): formulário com link do Azure, link do parent (opcional), repo
@@ -206,8 +212,8 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
   busca ao lado) + botão `.claude-btn` (cor própria — terracota/laranja,
   distinta do dourado geral, só pra sinalizar "isto abre o Claude") que
   abre um `cmd` na pasta daquele repo com `claude` digitado e **Enter
-  automático** (`biblioteca-cmd-run:` — é a única ação com auto-Enter, ver
-  acima), sem frase nenhuma, sem skill disparando — só uma janela rápida
+  automático** (`biblioteca-cmd-run:`, mesmo protocolo dos outros botões
+  desde 2026-08-24, ver acima), sem frase nenhuma, sem skill disparando — só uma janela rápida
   pra quem quer conversar sem estar amarrado a nenhuma task. Sem repo
   escolhido no campo, abre solto direto em `reposBasePath` (a pasta que
   contém todos os repos) em vez de não fazer nada. O comando é montado em
@@ -242,9 +248,10 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
 buscar/achar a task → expandir o card (seta no canto inferior direito) →
 clicar "Retomar task" ou "Ajustes QA" (ou abrir a
 caixa de ações na página de resumo) → um `cmd` novo abre com o comando já
-digitado (protocolo `biblioteca-cmd:`, se registrado) ou o texto já está no
-clipboard pra colar (fallback) → apertar Enter é sempre manual. Cada
-comando abre `claude "<frase>"` reconhecida por uma skill específica
+digitado **e já executado** (protocolo `biblioteca-cmd-run:`, se
+registrado) ou o texto já está no clipboard pra colar (fallback, sem
+protocolo registrado). Cada comando abre `claude "<frase>"` reconhecida
+por uma skill específica
 (`retomar`/`concluir`/`ajustar qa` + task + repo) — vai direto ao fluxo
 certo, sem menu. A estrela de favorito não copia nada — o efeito já
 acontece na própria página (ver acima).

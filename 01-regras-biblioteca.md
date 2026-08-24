@@ -45,6 +45,7 @@ Biblioteca/
 ├── resumo/{frontend,backend}/
 ├── handover-tecnico/{frontend,backend}/
 ├── reqs/                       # REQ/card original verbatim, fora do indice numerado
+├── planos/                     # backup automatico de todo plano de ExitPlanMode (hook), fora do indice numerado
 └── _archive/                   # docs substituidos ou anteriores a esta convencao
 ```
 
@@ -60,6 +61,7 @@ Biblioteca/
 | `resumo` | Dado factual pro dashboard — status/implementado/REQs/falta. **Um por task+repo**, nunca mais de um (ver "Regras de status" abaixo) |
 | `handover-tecnico` | Módulo, playbook, contrato, convenções, debug consolidado |
 | `reqs` | Card/issue do seu rastreador de tarefas (+ item pai, se houver) colado verbatim — referência crua, fora do índice numerado e do `sync-all.ps1` |
+| `planos` | Cópia bruta de cada plano aprovado em `ExitPlanMode` — sem vínculo com task/repo, backup histórico. Copiado automaticamente por hook (`~/.claude/settings.json`, `PermissionRequest` no matcher `ExitPlanMode`), não por ação manual do agente. Fora do índice numerado e do `sync-all.ps1` |
 
 **Camada (`repo:` → pasta):** o valor de `repo:` decide `frontend/` ou `backend/` — ex. `meu-app-frontend` → `.../frontend/`, `meu-app-backend` → `.../backend/`.
 
@@ -70,6 +72,8 @@ Biblioteca/
 `{NN}-{tipo}-{slug}-{taskId|general}.md` — ex. `27-testes-101034-aurora-sheet.md`.
 
 Exceção: `reqs/` usa `{taskId}-{slug}.md` — sem número sequencial, sem frontmatter obrigatório (é cópia de referência, não doc de ciclo de vida).
+
+Exceção: `planos/` usa `{yyyy-MM-dd_HHmmss}-{nome-original-do-plano}.md` — nome gerado pelo hook, sem número sequencial, sem frontmatter.
 
 ---
 
