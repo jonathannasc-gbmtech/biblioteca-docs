@@ -85,8 +85,16 @@ foreach ($g in $porClusterRepo) {
 # atualizar o link de volta - achado real: resumo/backend/907 e 914 ainda
 # referenciavam o nome antigo do handover-tecnico depois da migracao
 # pseudo_task). So aviso, nao bloqueia - referencia morta nao impede o build.
+# IMPORTANTE: existencia e' checada contra TODO arquivo devolvido por
+# Get-DocumentFiles, nao so' $allDocs (que exige `number:` no frontmatter) -
+# `reqs/*.md` nao tem frontmatter por convencao (ver 01-regras-biblioteca.md)
+# e ficava sempre marcado como "quebrado" mesmo quando o arquivo existia
+# (bug real, achado ao criar reqs/auditoria-performance-biblioteca.md).
 $allByPath = @{}
-foreach ($d in $allDocs) { $allByPath[$d.Path] = $true }
+foreach ($d in $parsedDocs) {
+    $rel = $d.File.FullName.Substring($root.Length + 1) -replace '\\', '/'
+    $allByPath[$rel] = $true
+}
 foreach ($d in $allDocs) {
     foreach ($r in $d.Related) {
         if (-not $allByPath.ContainsKey($r)) {
