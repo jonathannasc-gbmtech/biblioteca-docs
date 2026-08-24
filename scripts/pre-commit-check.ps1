@@ -8,8 +8,23 @@ $failed = $false
 # lib-doc.ps1 mudou nesta commit? Roda o self-check do Parse-Frontmatter
 # antes de deixar passar - e' a funcao compartilhada que corrompeu 42 docs
 # da ultima vez que quebrou sem teste nenhum (commit 9a4edaf).
-if ($staged -contains '_ferramenta/scripts/lib-doc.ps1') {
+# Match por SUFIXO do path, nunca path completo - o path do repo diverge
+# entre a copia pessoal (_ferramenta/scripts/...) e o export publico
+# biblioteca-docs (flat, scripts/...); comparar path inteiro deixava o
+# check morto (nunca disparava) num dos dois lados. Mesma logica no
+# caminho de invocacao abaixo: relativo a $PSScriptRoot, nao a $root, pra
+# funcionar igual nas duas estruturas de pasta.
+if ($staged | Where-Object { $_ -match 'scripts[\\/]lib-doc\.ps1$' }) {
     & (Join-Path $PSScriptRoot 'test-lib-doc.ps1')
+    if ($LASTEXITCODE) { $failed = $true }
+}
+
+# dashboard-lib.ps1 mudou nesta commit? Roda o self-check das funcoes
+# puras extraidas do build-dashboard.ps1 (Esc/Get-Signals/Get-LaunchUri/
+# Get-CardCommands/Get-RepoSortKey) - inclui a regressao do fix de
+# apostrofo em Task/Repo (auditoria 2026-08-24).
+if ($staged | Where-Object { $_ -match 'dashboard-visual[\\/]scripts[\\/]dashboard-lib\.ps1$' }) {
+    & (Join-Path $PSScriptRoot '..\dashboard-visual\scripts\test-dashboard-lib.ps1')
     if ($LASTEXITCODE) { $failed = $true }
 }
 

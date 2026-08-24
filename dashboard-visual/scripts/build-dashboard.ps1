@@ -15,6 +15,7 @@ $hubRoot = Split-Path $PSScriptRoot -Parent
 $libRoot = Split-Path $hubRoot -Parent
 $libScript = Join-Path $libRoot 'scripts\lib-doc.ps1'
 . $libScript
+. (Join-Path $PSScriptRoot 'dashboard-lib.ps1')
 
 $root = Get-LibRoot
 # -ParsedDocs vem de sync-all.ps1 (parse compartilhado); sem ele (rodando
@@ -25,11 +26,6 @@ $typeOrder = @{ 'task-code' = 0; 'task-planning' = 1; 'testes' = 2; 'handover-te
 $activeStatuses = @('draft', 'in_progress')
 $bibConfig = Get-BibliotecaConfig
 $azureBase = $bibConfig.azureOrgUrl
-
-function Esc([string]$s) {
-    if ($null -eq $s) { return '' }
-    return $s.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;').Replace('"', '&quot;')
-}
 
 $githubIcon = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.02 1.93-.02 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>'
 $linkIcon = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M4.72 3.5a2.25 2.25 0 000 4.5h1.5a.75.75 0 010 1.5h-1.5a3.75 3.75 0 010-7.5h1.5a.75.75 0 010 1.5h-1.5zm6.56 0h-1.5a.75.75 0 000 1.5h1.5a2.25 2.25 0 010 4.5h-1.5a.75.75 0 000 1.5h1.5a3.75 3.75 0 000-7.5zM5.5 8a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5h-3.5A.75.75 0 015.5 8z"/></svg>'
@@ -182,51 +178,17 @@ function Get-LayerStatusHtml([PSCustomObject]$card) {
         @{ Label = "Testes unit${aAcute}rios"; State = $unitState }
         @{ Label = 'Testes manuais'; State = $manualState }
     )
+    # Se nenhuma camada tem sinal nenhum (sem PR em migrations/backend/
+    # frontend, sem doc `testes/` com secao unitaria/manual), o bloco
+    # inteiro seria so' 5 linhas amarelas "nao necessario" - ruido puro em
+    # card que nunca teve essas camadas pra comecar (handover/investigacao,
+    # tasks `general` na maioria das vezes). Nao mostra nada nesse caso.
+    if (@($layers | Where-Object { $_.State -ne 'na' }).Count -eq 0) { return '' }
     $rows = ($layers | ForEach-Object {
         $stateLabel = switch ($_.State) { 'done' { 'feito' }; 'pending' { 'pendente' }; default { 'nao necessario' } }
         "<div class=`"layer-row layer-$($_.State)`"><span class=`"layer-dot`"></span><span class=`"layer-label`">$($_.Label)</span><span class=`"layer-state`">$stateLabel</span></div>"
     }) -join "`n"
     return "<div class=`"position layer-status`">$rows</div>"
-}
-
-function Get-Signals($docs) {
-    $prLinks = New-Object System.Collections.Generic.List[string]
-    foreach ($d in $docs) {
-        foreach ($m in [regex]::Matches($d.Body, 'https?://github\.com/\S*?/pull/\d+')) {
-            if (-not $prLinks.Contains($m.Value)) { $prLinks.Add($m.Value) }
-        }
-    }
-    return [PSCustomObject]@{
-        PRs = @($prLinks | Select-Object -First 10)
-    }
-}
-
-# Comandos copiaveis de um card - usado tanto pelos botoes inline do card
-# quanto pela caixa de acoes da pagina de resumo, pra nao duplicar as
-# strings de comando em dois lugares.
-# Prefixo do protocolo customizado registrado por register-protocol.ps1 -
-# um link biblioteca-cmd:<comando url-encoded> abre um cmd novo com o
-# comando ja digitado (launch-command.vbs), sem apertar Enter. Some sem
-# erro em navegador/maquina sem o protocolo registrado - so o clipboard
-# (fallback de sempre) continua funcionando.
-function Get-LaunchUri([string]$cmdText, [switch]$AutoRun) {
-    $scheme = if ($AutoRun) { 'biblioteca-cmd-run:' } else { 'biblioteca-cmd:' }
-    return $scheme + [Uri]::EscapeDataString($cmdText)
-}
-
-function Get-CardCommands([PSCustomObject]$card) {
-    # Envolvido em "powershell -NoProfile -Command" pra funcionar colado tanto
-    # no cmd.exe (onde ; nao separa comandos, quebrava o cd) quanto no
-    # PowerShell - independe do shell padrao do usuario.
-    $base = "cd '$hubRoot'"
-    $cmds = New-Object System.Collections.Generic.List[PSCustomObject]
-    if ($card.Active) {
-        $cmd = "powershell -NoProfile -Command `"$base; claude 'retomar task $($card.Task) no repo $($card.Repo)'`""
-        $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = (Get-LaunchUri $cmd -AutoRun) })
-    }
-    $qaCmd = "powershell -NoProfile -Command `"$base; claude 'ajustar qa task $($card.Task) no repo $($card.Repo)'`""
-    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = (Get-LaunchUri $qaCmd -AutoRun) })
-    return $cmds
 }
 
 # Pills de links externos (Azure DevOps + PR do GitHub, com cor por estado
@@ -339,36 +301,6 @@ if ($bibConfig.reposBasePath -and (Test-Path $bibConfig.reposBasePath)) {
     foreach ($dir in (Get-ChildItem -Path $bibConfig.reposBasePath -Directory -ErrorAction SilentlyContinue)) {
         if (-not $knownRepos.Contains($dir.Name)) { $knownRepos.Add($dir.Name) }
     }
-}
-
-# Ordenacao logica (nao alfabetica pura): backend + frontend/mfe/mobile do
-# mesmo dominio ficam juntos (settings-backend do lado de mfe-settings),
-# dominios sem par (migrations, geral) ficam depois dos pares, e repos de
-# skills pessoais (nao-projeto) sempre por ultimo. Descarta entradas
-# malformadas (valor com virgula/espaco vindo de frontmatter com 2 repos
-# no mesmo campo por engano - nao e' pasta de verdade).
-$domainAliases = @{ 'schedule' = 'scheduling' }
-$domainRank = @{ 'backoffice' = 0; 'collector' = 1; 'railroad' = 2; 'road' = 3; 'scheduling' = 4; 'settings' = 5; 'stock' = 6 }
-$personalRepos = @('gbm-ai-skills', 'jow-ai-skills', 'ponytail')
-
-function Get-RepoSortKey([string]$repo) {
-    if ($personalRepos -contains $repo.ToLowerInvariant()) {
-        return [PSCustomObject]@{ Bucket = 2; DomainRank = 99; Domain = ''; SubOrder = 0; Name = $repo }
-    }
-    $domain = $null
-    $subOrder = 3
-    if ($repo -match '^gbm-app-(.+)-backend$') { $domain = $Matches[1]; $subOrder = 0 }
-    elseif ($repo -match '^gbm-mfe-(.+)$') {
-        $raw = $Matches[1]
-        $domain = if ($domainAliases.ContainsKey($raw)) { $domainAliases[$raw] } else { $raw }
-        $subOrder = 1
-    } elseif ($repo -match '^gbm-mobile-(.+)$') { $domain = $Matches[1]; $subOrder = 2 }
-
-    if ($domain) {
-        $rank = if ($domainRank.ContainsKey($domain)) { $domainRank[$domain] } else { 50 }
-        return [PSCustomObject]@{ Bucket = 0; DomainRank = $rank; Domain = $domain; SubOrder = $subOrder; Name = $repo }
-    }
-    return [PSCustomObject]@{ Bucket = 1; DomainRank = 0; Domain = ''; SubOrder = 0; Name = $repo }
 }
 
 $knownRepos = @($knownRepos | Where-Object { $_ -match '^[A-Za-z0-9._-]+$' } |
@@ -1591,6 +1523,41 @@ if (-not $doneHtml) { $doneHtml = '<p class="empty">Nenhuma task completa.</p>' 
 
 $today = Get-Date -Format 'dd/MM/yyyy HH:mm'
 
+# "Lombada de estante" - faixa horizontal no header, 1 segmento por tipo
+# de doc, largura proporcional a quantos docs existem de cada tipo hoje
+# na Biblioteca. Preenche o espaco vazio do header com dado real (nao so
+# decoracao) - mesmas 5 cores ja usadas nos chips dos cards, pra ficar
+# consistente com o resto do app.
+$spineTypes = @(
+    @{ Type = 'task-code'; Label = 'Task code'; Color = '#d9b568' }
+    @{ Type = 'task-planning'; Label = 'Task planning'; Color = '#7cbfc4' }
+    @{ Type = 'testes'; Label = 'Testes'; Color = '#86b894' }
+    @{ Type = 'handover-tecnico'; Label = 'Handover tecnico'; Color = '#c184a0' }
+    @{ Type = 'rules'; Label = 'Regras'; Color = '#a89484' }
+)
+$spineTotal = 0
+$spineData = foreach ($t in $spineTypes) {
+    $typeKey = $t.Type
+    $count = @($all | Where-Object { $_.Type -eq $typeKey }).Count
+    $spineTotal += $count
+    [PSCustomObject]@{ Type = $typeKey; Label = $t.Label; Color = $t.Color; Count = $count }
+}
+$spineHtml = ''
+if ($spineTotal -gt 0) {
+    $visibleTypes = @($spineData | Where-Object { $_.Count -gt 0 })
+    $segs = ($visibleTypes | ForEach-Object {
+        $pct = [math]::Round(($_.Count / $spineTotal) * 100, 2)
+        "<span class=`"spine-seg`" data-type=`"$(Esc $_.Type)`" style=`"width:$pct%;background:$($_.Color)`"></span>"
+    }) -join ''
+    # 1 caixa so' com todos os tipos (nao 1 tooltip por segmento - obrigava
+    # passar o mouse em cada um pra ver tudo). No mouseover de um segmento
+    # especifico, JS destaca so' a linha correspondente dentro da caixa.
+    $legendRows = ($visibleTypes | ForEach-Object {
+        "<div class=`"legend-row`" data-type=`"$(Esc $_.Type)`"><i style=`"background:$($_.Color)`"></i>$(Esc $_.Label): $($_.Count)</div>"
+    }) -join ''
+    $spineHtml = "<div class=`"lib-spine`">$segs<div class=`"spine-legend`">$legendRows</div></div>"
+}
+
 $head = @'
 <!doctype html>
 <html lang="pt-BR">
@@ -1614,9 +1581,14 @@ $faviconLink
     --gold-border: #6b5628;
     --current: #d97b3f;
     --current-glow: rgba(217, 123, 63, 0.28);
-    --claude-bg: #2e1f16;
-    --claude-border: #a85a35;
-    --claude-bright: #d97757;
+    /* Teste: verde (do logo/livro, #22c55e) em vez do terracota - os 2
+       botoes do header ficam verde+dourado, as 2 cores da propria marca
+       da Biblioteca, junto no mesmo lugar. So' esta pagina usa esses
+       valores (cada pagina gerada tem seu proprio :root) - nao muda
+       .claude-btn em nova-task.html/outras paginas ainda. */
+    --claude-bg: #16281c;
+    --claude-border: #2f6b45;
+    --claude-bright: #4ade80;
   }
   * { box-sizing: border-box; }
   *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
@@ -1627,19 +1599,77 @@ $faviconLink
     margin: 0;
     padding: 24px 32px 64px;
   }
-  .top-header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-bottom: 2px solid var(--gold-border); padding-bottom: 16px; margin-bottom: 22px; }
+  /* 2 linhas, nao 1 - a 1a tentativa (divisor de 1px entre 3 grupos numa
+     linha so) nao criava fronteira visual perceptivel nenhuma numa fileira
+     ja cheia de botao/pill colorido. Separar por LINHA (identidade+nav de
+     referencia acima, barra de ferramentas de busca/acao abaixo) resolve
+     sem depender de um traco fino que ninguem nota. Ordem dos itens dentro
+     de cada linha continua a mesma de antes. */
+  .top-header { display: flex; flex-direction: column; gap: 14px; border-bottom: 2px solid var(--gold-border); padding-bottom: 16px; margin-bottom: 22px; }
+  .header-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  /* Linha da barra de ferramentas (busca/repo/acoes) usa gap menor que a
+     linha de identidade+nav - era o valor original do .quick-open (6px),
+     padronizado agora pros 4 itens da linha, nao só entre repo/Abrir Claude. */
+  /* Experimento: barra de ferramentas alinhada a direita, embaixo do
+     grupo de nav (que tambem fica a direita na linha 1), em vez de
+     embaixo do bloco de identidade a esquerda. Sem flex-grow no
+     search-wrap aqui - com grow:1 ele ocupava o espaco livre e o
+     justify-content:flex-end nao tinha sobra nenhuma pra empurrar. */
+  .header-row-tools { gap: 6px; justify-content: flex-end; }
+  /* Lombada de estante - preenche o espaco vazio entre identidade e nav
+     com dado real (composicao da Biblioteca por tipo), nao decoracao.
+     Sem overflow:hidden no container - clipava a legenda que precisa
+     "escapar" pra cima. Arredondado so nas pontas (1o/ultimo segmento),
+     nao via overflow do container. Precisa de position:relative pra ser
+     a ancora da legenda (que e' 1 filho a mais, nao 1 por segmento). */
+  .lib-spine { display: flex; align-items: center; height: 8px; flex: 1 1 auto; margin: 0 24px; background: var(--card-border); border-radius: 999px; position: relative; }
+  .spine-seg { height: 100%; }
+  .spine-seg:first-child { border-radius: 999px 0 0 999px; }
+  .spine-seg:last-child { border-radius: 0 999px 999px 0; }
+  .spine-seg:only-child { border-radius: 999px; }
+  .spine-seg:not(:last-child) { border-right: 1px solid var(--bg); }
+  /* 1 legenda so' com todos os tipos (nao 1 tooltip por segmento - tinha
+     que passar o mouse em cada um pra ver tudo). Aparece embaixo da
+     lombada, acoplada a posicao X do cursor (JS atualiza `left` no
+     mousemove, ver <script> no fim da pagina) - o :hover so' cuida da
+     visibilidade (opacity), a posicao horizontal e' sempre a do cursor.
+     Setinha no topo (::before/::after) aponta pra cima, pro cursor. */
+  .spine-legend {
+    position: absolute; top: 130%; left: 0; transform: translateX(-50%);
+    background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;
+    padding: 8px 10px; font-size: 0.76rem; white-space: nowrap;
+    opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 20;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .spine-legend::before, .spine-legend::after {
+    content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+    border-left: 6px solid transparent; border-right: 6px solid transparent;
+  }
+  .spine-legend::before { top: -6px; border-bottom: 6px solid var(--card-border); }
+  .spine-legend::after { top: -5px; border-bottom: 5px solid var(--card-bg); }
+  .lib-spine:hover .spine-legend { opacity: 1; }
+  .legend-row { display: flex; align-items: center; gap: 6px; color: var(--text-dim); border-radius: 4px; padding: 2px 5px; }
+  .legend-row i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .legend-row.active { color: var(--text); background: var(--card-border); font-weight: 600; }
+  .header-row-tools .search-wrap { flex: 0 0 320px; }
   .brand-icon { flex-shrink: 0; }
   .brand-icon svg { width: 32px; height: 32px; }
+  .util-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
   .palette-link {
-    margin-left: auto; color: var(--text-dim); text-decoration: none; font-size: 0.78rem;
+    color: var(--text-dim); text-decoration: none; font-size: 0.78rem;
     border: 1px solid var(--card-border); border-radius: 999px; padding: 5px 12px;
     display: inline-flex; align-items: center; gap: 5px;
   }
   .palette-link:hover { color: var(--gold-bright); border-color: var(--gold-border); }
-  .palette-link + .palette-link { margin-left: 0; }
   h1 { font-size: 1.6rem; margin: 0; color: #fff; letter-spacing: 0.02em; }
-  .sub { color: var(--text-faint); font-size: 0.85rem; margin: 2px 0 0; }
-  .stat { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; }
+  .sub { color: var(--gold); font-size: 0.85rem; margin: 2px 0 0; }
+  /* Stats (ativas/completas) na propria linha, separadas do "Atualizado
+     em" - mesma logica de "1 grupo por linha" usada no resto do header.
+     --gold (nao --gold-bright) - a versao "bright" ficava vibrante demais
+     pra texto corrido, --gold e' o mesmo dourado mais discreto. Os dots
+     (verde/cinza) continuam com cor propria, sao sinal de status real. */
+  .stats-row { display: flex; align-items: center; gap: 14px; margin: 6px 0 0; font-size: 0.85rem; color: var(--gold); }
+  .stat { display: inline-flex; align-items: center; gap: 5px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; display: inline-block; }
   .dot-neutral { background: var(--text-faint); }
   .search-wrap { position: relative; margin: 0; max-width: 480px; flex: 1 1 260px; }
@@ -1660,7 +1690,7 @@ $faviconLink
   .clear-btn.visible { display: flex; }
   h2 {
     font-size: 1rem; color: var(--gold-bright); text-transform: uppercase; letter-spacing: 0.08em;
-    border-bottom: 1px solid var(--card-border); padding-bottom: 8px; margin-top: 32px;
+    border-bottom: 1px solid var(--gold-border); padding-bottom: 8px; margin-top: 32px;
   }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-top: 16px; }
   .card {
@@ -1767,7 +1797,11 @@ $faviconLink
   .top-header .primary-link, .claude-btn {
     padding: 9px 16px; font-size: 0.85rem; border-radius: 8px;
   }
-  .primary-link { border-color: var(--gold); font-weight: 600; }
+  /* color proprio (nao so' border) - sem isso o texto ficava na cor
+     neutra do .copy-btn generico, e o botao lia mais "apagado" que o
+     Abrir Claude ao lado (esse usa --claude-bright no texto) mesmo os
+     dois tendo o mesmo peso de acao no header. */
+  .primary-link { border-color: var(--gold); color: var(--gold-bright); font-weight: 600; }
   .claude-btn {
     background: var(--claude-bg); color: var(--claude-bright); border: 1px solid var(--claude-border);
     font-weight: 600; cursor: pointer; display: inline-block; text-decoration: none;
@@ -1970,6 +2004,25 @@ wireClearBtn(quickRepoFilter, document.getElementById('quick-repo-clear'));
 if (search) { search.addEventListener('input', applyFilters); }
 if (quickRepoFilter) { quickRepoFilter.addEventListener('input', applyFilters); }
 
+// Lombada de estante (header) - 1 legenda so' com todos os tipos; no
+// mouseover de um segmento especifico, destaca so' a linha correspondente
+// (por data-type) em vez de forcar passar o mouse em cada segmento. A
+// caixa acompanha a posicao X do cursor (nao fica fixa num canto).
+document.querySelectorAll('.spine-seg').forEach(function (seg) {
+  var row = document.querySelector('.legend-row[data-type="' + seg.getAttribute('data-type') + '"]');
+  if (!row) { return; }
+  seg.addEventListener('mouseenter', function () { row.classList.add('active'); });
+  seg.addEventListener('mouseleave', function () { row.classList.remove('active'); });
+});
+var libSpine = document.querySelector('.lib-spine');
+var spineLegend = document.querySelector('.spine-legend');
+if (libSpine && spineLegend) {
+  libSpine.addEventListener('mousemove', function (e) {
+    var rect = libSpine.getBoundingClientRect();
+    spineLegend.style.left = (e.clientX - rect.left) + 'px';
+  });
+}
+
 // Auto-reload: dashboard.html e' estatico, sync-all.ps1 regenera o arquivo
 // mas a aba aberta nao sabe sozinha - sem servidor rodando, um file:// nao
 // consegue reler a si mesmo sem recarregar (fetch bloqueado por seguranca
@@ -2050,26 +2103,34 @@ $knownReposOptionsHtml
 
 $body = @"
 <header class="top-header">
-  <span class="brand-icon">$brandIconGreen</span>
-  <div>
-    <h1>Biblioteca</h1>
-    <p class="sub">Dashboard de tasks &middot; Gerado em $today
-      <span class="stat"><span class="dot"></span>$($activeCards.Count) ativas</span>
-      <span class="stat"><span class="dot dot-neutral"></span>$($doneCards.Count) completas</span>
-    </p>
+  <div class="header-row">
+    <span class="brand-icon">$brandIconGreen</span>
+    <div>
+      <h1>Biblioteca</h1>
+      <p class="sub">Atualizado em $today</p>
+      <p class="stats-row">
+        <span class="stat"><span class="dot"></span>$($activeCards.Count) ativas</span>
+        <span class="stat"><span class="dot dot-neutral"></span>$($doneCards.Count) completas</span>
+      </p>
+    </div>
+    $spineHtml
+    <nav class="util-nav">
+      <a class="palette-link" href="historico-nova-task.md" target="_blank">$archiveIcon Historico</a>
+      <a class="palette-link" href="paleta.html" target="_blank">$paletteIcon Paleta de cores</a>
+      <a class="palette-link" href="archive.html" target="_blank">$archiveIcon Arquivo</a>
+      <a class="palette-link" href="pendencias.html" target="_blank">$pendIcon Pendencias$(if ($pendenciasCount) { " ($pendenciasCount)" })</a>
+      <a class="palette-link" href="mock/dashboard-mock.html" target="_blank">$mockIcon Mock</a>
+    </nav>
   </div>
-  <div class="search-wrap">
-    <span class="search-icon">$searchIcon</span>
-    <input id="search" type="text" placeholder="Buscar por task, repo ou descricao..." autocomplete="off">
-    <button type="button" class="clear-btn" id="search-clear" aria-label="Limpar busca" title="Limpar">&times;</button>
+  <div class="header-row header-row-tools">
+    <div class="search-wrap">
+      <span class="search-icon">$searchIcon</span>
+      <input id="search" type="text" placeholder="Buscar por task, repo ou descricao..." autocomplete="off">
+      <button type="button" class="clear-btn" id="search-clear" aria-label="Limpar busca" title="Limpar">&times;</button>
+    </div>
+    $quickOpenHtml
+    <a class="copy-btn primary-link" href="nova-task.html" target="_blank">+ Nova Task</a>
   </div>
-  $quickOpenHtml
-  <a class="copy-btn primary-link" href="nova-task.html" target="_blank">+ Nova Task</a>
-  <a class="palette-link" href="historico-nova-task.md" target="_blank">$archiveIcon Historico</a>
-  <a class="palette-link" href="paleta.html" target="_blank">$paletteIcon Paleta de cores</a>
-  <a class="palette-link" href="archive.html" target="_blank">$archiveIcon Arquivo</a>
-  <a class="palette-link" href="pendencias.html" target="_blank">$pendIcon Pendencias$(if ($pendenciasCount) { " ($pendenciasCount)" })</a>
-  <a class="palette-link" href="mock/dashboard-mock.html" target="_blank">$mockIcon Mock</a>
 </header>
 
 <h2>Ativas</h2>
