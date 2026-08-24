@@ -221,7 +221,7 @@ $prLines
 - Nada registrado - ver PR(s) acima pro diff real
 "@
 
-    $fileName = "$script:nextNumber-resumo-$slug-$($group.Task).md"
+    $fileName = "$($group.Task)-$slug.md"
     $destDir = Join-Path $root "resumo\$layer"
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     $destPath = Join-Path $destDir $fileName

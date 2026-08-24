@@ -7,7 +7,7 @@ task: TASK_ID
 function: Testes unitarios e manuais - resumo
 stub: —
 related:
-  - task-planning/NN-task-planning-TASK_ID.md
+  - task-planning/TASK_ID-{slug}.md
 updated: YYYY-MM-DD
 author: —
 ---

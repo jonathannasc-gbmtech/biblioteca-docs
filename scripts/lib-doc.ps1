@@ -90,8 +90,16 @@ function Parse-Frontmatter([string]$text) {
     if ($text -notmatch '(?s)^(---\r?\n)(.*?)(\r?\n---\r?\n)') {
         return $null
     }
+    # Matches[0]/[2] guardados ANTES do foreach abaixo - o loop usa -match
+    # em cada linha, o que sobrescreve a variavel automatica $Matches do
+    # match externo. Ler $Matches depois do loop pra calcular $end usava
+    # por engano o ultimo match INTERNO (bug real, corrompia .Body sempre
+    # que lido direto sem passar por Get-ContentBody - so nao aparecia
+    # porque Get-ContentBody "cura" isso ao cortar tudo antes do 1o "# ").
+    $frontmatterLen = $Matches[0].Length
+    $metaBlock = $Matches[2]
     $meta = @{}
-    foreach ($line in ($Matches[2] -split '\r?\n')) {
+    foreach ($line in ($metaBlock -split '\r?\n')) {
         if ($line -match '^related:\s*$') {
             $meta['_related_last'] = $true
             $meta['related'] = @()
@@ -106,8 +114,7 @@ function Parse-Frontmatter([string]$text) {
         }
     }
     $meta.Remove('_related_last') | Out-Null
-    $end = $Matches[1].Length + $Matches[2].Length + $Matches[3].Length
-    $body = $text.Substring($end)
+    $body = $text.Substring($frontmatterLen)
     return @{ Meta = $meta; Body = $body }
 }
 
@@ -290,6 +297,25 @@ function Get-NextNumber($docs) {
         $p = Parse-Frontmatter ([IO.File]::ReadAllText($d.FullName))
         if ($p -and $p.Meta['number'] -match '^\d+$') {
             $n = [int]$p.Meta['number']
+            if ($n -gt $max) { $max = $n }
+        }
+    }
+    return $max + 1
+}
+
+# pseudo_task e' um contador separado do `number:` global - so pra doc
+# `task: general` que quer um numero curto e buscavel (ver
+# 01-regras-biblioteca.md, campo `pseudo_task`). Faixa 900+ desde
+# 2026-08-24 (decisao do usuario) - nunca colide visualmente com task id
+# real (todo id GBM comeca com 1, ex. 104691) e filtra so digitando "9" na
+# busca do dashboard. Historico pre-900: comecou em 13/14, renumerado
+# retroativamente pra 901/902 na mesma decisao.
+function Get-NextPseudoTask($docs) {
+    $max = 900
+    foreach ($d in $docs) {
+        $p = Parse-Frontmatter ([IO.File]::ReadAllText($d.FullName))
+        if ($p -and $p.Meta['pseudo_task'] -match '^\d+$') {
+            $n = [int]$p.Meta['pseudo_task']
             if ($n -gt $max) { $max = $n }
         }
     }

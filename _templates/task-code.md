@@ -7,7 +7,7 @@ task: TASK_ID
 function: Resumo do card/issue — uma linha
 stub: —
 related:
-  - handover-tecnico/02-handover-tecnico-aurora-sheet-general.md
+  - handover-tecnico/903-aurora-sheet-handover-tecnico.md
 updated: YYYY-MM-DD
 author: —
 ---

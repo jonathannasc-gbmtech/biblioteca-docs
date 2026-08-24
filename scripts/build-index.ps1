@@ -20,6 +20,7 @@ foreach ($f in $files) {
 }
 
 $next = Get-NextNumber $files
+$nextPseudoTask = Get-NextPseudoTask $files
 $today = Get-Date -Format 'dd/MM/yyyy'
 
 $tableHeader = @(
@@ -37,6 +38,7 @@ $index = @(
     ''
     "**Pasta:** ``$root``  "
     "**Proximo numero:** ``$next``  "
+    ('**Proximo pseudo_task (doc ``task: general`` sem numero de task real):** ``' + $nextPseudoTask + '``  ')
     "**Atualizado:** $today"
     ''
     '---'
@@ -92,4 +94,4 @@ foreach ($type in $groupOrder) {
 
 $catOut = Join-Path $root 'CATALOGO.md'
 [System.IO.File]::WriteAllText($catOut, ($catalogo -join "`r`n"))
-Write-Host "build-index: $($rows.Count) entradas, proximo #$next"
+Write-Host "build-index: $($rows.Count) entradas, proximo #$next, proximo pseudo_task $nextPseudoTask"

@@ -8,7 +8,7 @@ function: Plano de execucao — resumo
 stub: —
 plan_active: plano-1
 related:
-  - task-code/NN-task-code-TASK_ID.md
+  - task-code/TASK_ID-{slug}.md
 updated: YYYY-MM-DD
 author: —
 ---
