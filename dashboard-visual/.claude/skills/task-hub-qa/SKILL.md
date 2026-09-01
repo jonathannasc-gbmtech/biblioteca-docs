@@ -54,15 +54,35 @@ exatamente os passos 1-5 da "Rotina de retomada" em
 - **Registra uma nota no doc `testes/`** dessa task+repo (mesmo arquivo —
   regra de "um documento por task" do `controle-documentacao`): uma seção
   `## Ajustes QA` (ou repetir a seção se já existir uma rodada anterior,
-  numerando: "Ajustes QA — rodada 2") com data + o que o QA reportou
-  (perguntar ao usuário, não inventar) + o que foi corrigido, preenchido
-  conforme a conversa avança — não é gerado automaticamente de uma vez.
+  numerando: "Ajustes QA — rodada 2 (data)") — preenchida conforme a
+  conversa avança, não gerada automaticamente de uma vez. **A seção
+  sempre ABRE com 3 bullets nesse formato exato** (o dashboard
+  (`build-dashboard.ps1`, `Get-QaFieldValue`) lê essas 3 linhas pra
+  montar o card da rodada — sem elas, o card cai num teaser genérico e
+  menos legível):
+  ```markdown
+  - **Reportado:** o que o QA/PO relatou (perguntar ao usuário, não inventar).
+  - **Causa raiz:** o motivo real do problema — se a rodada for pedido de
+    feature em vez de bug, usar `N/A (pedido de feature, não bug)`.
+  - **Corrigido:** o que foi mudado pra resolver.
+  ```
+  Detalhe adicional (verificação, tabela de resultado, incidentes,
+  causa raiz aprofundada, etc.) é livre e vai **depois** desses 3
+  bullets, no mesmo padrão de sempre. Exemplo real já nesse formato:
+  `testes/backend/104691-page-relation-fix-migrations-testes.md`.
 - **Toca o `resumo`** da task+repo (gatilho já existente em
   `controle-documentacao` pra qualquer atualização de doc da task) —
-  atualizar "Status atual" mencionando a rodada de QA em andamento, sem
-  mudar `status` do resumo. Gravar também o campo `branch:` com o nome
-  resolvido/criado no passo 3 (quase sempre uma branch nova, já que a
-  original foi mergeada e deletada) — sobrescreve o valor anterior.
+  **reescrever** "Status atual" pro snapshot do estado atual (branch, PR
+  número+estado, o que está pendente — poucas linhas, bullets), sem mudar
+  `status` do resumo. **Não acrescentar** mais um parágrafo de narrativa
+  da rodada ali — o relato do que o QA achou/causa raiz/fix já foi pro
+  `## Ajustes QA` do `testes/` (item acima); duplicar em "Status atual"
+  é o que faz esse campo virar um log que só cresce a cada rodada, sem
+  nunca refletir só o estado atual (caso real: task 104691, 2 rodadas de
+  QA deixaram "Status atual" com 80+ linhas de histórico). Gravar também
+  o campo `branch:` com
+  o nome resolvido/criado no passo 3 (quase sempre uma branch nova, já
+  que a original foi mergeada e deletada) — sobrescreve o valor anterior.
 - Rodar `scripts\sync-all.ps1` da Biblioteca depois.
 
 ## Bug relacionado achado durante o ajuste — resolve antes de subir, não só documenta

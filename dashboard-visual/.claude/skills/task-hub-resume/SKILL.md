@@ -81,8 +81,14 @@ precisar de julgamento.
    guardado (nao fazer isso em silencio).
 3. **Branch da task selecionada:** `git -C <path> branch -a` procurando o
    padrao `<tipo>/<taskId>[-slug]`.
-   - Existe local -> `git checkout <branch>`.
-   - So existe remota -> `git checkout -b <branch> origin/<branch>`.
+   - Existe local ou remota -> antes de reusar, checar
+     `gh pr list --head <branch> --state all` (mesma checagem do gate de
+     Branch do `CLAUDE.md` do time). PR ja merged/closed -> nao dar
+     checkout na branch antiga; tratar como "nao existe nenhuma" abaixo
+     (criar nova a partir do branch base) e avisar o usuario que a antiga
+     foi descartada por ja ter sido mergeada/fechada.
+   - Sem PR merged/closed, existe local -> `git checkout <branch>`.
+   - Sem PR merged/closed, so existe remota -> `git checkout -b <branch> origin/<branch>`.
    - Nao existe nenhuma -> primeira vez nessa task. Criar a partir do
      branch base do projeto (`defaultBranch` em `biblioteca.config.json`;
      sem esse campo, usar `main`) seguindo a convencao; `<tipo>` vem do

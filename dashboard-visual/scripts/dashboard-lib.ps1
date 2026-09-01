@@ -8,10 +8,27 @@ function Esc([string]$s) {
     return $s.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;').Replace('"', '&quot;')
 }
 
-function Get-Signals($docs) {
+# $task (opcional, task numerica do card) filtra links de PR que sao
+# CITACAO a outra task, nao PR proprio dela - convencao comum nos docs
+# da Biblioteca e' citar trabalho relacionado tipo "...achado ao
+# investigar o equivalente X (task 104691, PR [...](...))". Sem esse
+# filtro, o PR citado vazava pro card da task ERRADA (bug real,
+# 2026-08-25: PR #288 da task 104691 aparecendo no card da task 104689
+# so' por ter sido citado la como referencia). So' exclui quando a
+# citacao "task NNNNN" aparece pouco antes do link E o numero diverge
+# do card - citacao de PR da MESMA task (ex.: migration espelho, PR de
+# outro repo mas mesma task) nunca tem esse prefixo "task NNNNN" antes
+# (a convencao so' cita "task N" pra apontar OUTRA task), entao continua
+# passando normalmente.
+function Get-Signals($docs, $task) {
     $prLinks = New-Object System.Collections.Generic.List[string]
     foreach ($d in $docs) {
         foreach ($m in [regex]::Matches($d.Body, 'https?://github\.com/\S*?/pull/\d+')) {
+            if ($task -and $task -match '^\d+$') {
+                $precedingStart = [Math]::Max(0, $m.Index - 80)
+                $preceding = $d.Body.Substring($precedingStart, $m.Index - $precedingStart)
+                if ($preceding -match 'task\s+(\d+)' -and $Matches[1] -ne $task) { continue }
+            }
             if (-not $prLinks.Contains($m.Value)) { $prLinks.Add($m.Value) }
         }
     }

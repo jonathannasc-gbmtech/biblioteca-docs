@@ -35,18 +35,44 @@ decoded = UrlDecode(encoded)
 ' auditoria de 2026-08-24 (2 de 3 revisores blind apontaram isso
 ' independentemente). Toda invocacao legitima gerada hoje
 ' (build-dashboard.ps1 Get-CardCommands/quick-open, nova-task.html)
-' comeca exatamente com este prefixo; qualquer coisa fora disso, ou com
-' metacaractere de encadeamento do cmd.exe (permitiria rodar um 2o
-' comando depois do nosso, mesmo batendo o prefixo), e' bloqueada.
+' comeca exatamente com este prefixo e termina com a aspa dupla que fecha
+' o "-Command "..."" do PowerShell, sem outra aspa dupla nem quebra de
+' linha no meio (ver IsAllowedCommand); qualquer coisa fora disso e'
+' bloqueada.
 If Not IsAllowedCommand(decoded) Then
     MsgBox "Comando bloqueado - nao bate com o formato esperado do protocolo biblioteca-cmd. Se voce clicou isso a partir do dashboard.html da Biblioteca, isso e' um bug (avise o autor); se veio de outro lugar, o bloqueio e' o comportamento certo.", vbExclamation, "Biblioteca - comando bloqueado"
     WScript.Quit 1
 End If
 
+' AppActivate por "cmd.exe" batia por substring de titulo contra QUALQUER
+' janela existente, nao so' a que acabamos de abrir - se o usuario ja
+' tinha outro cmd.exe aberto (ou clicava 2 botoes rapido), o SendKeys podia
+' ir pra janela errada: a nova ficava vazia, a antiga recebia o comando
+' (ponto fragil real, apontado em 2026-09-01). Correcao: a janela nova
+' recebe um titulo unico (marker aleatorio via "title") antes de qualquer
+' SendKeys, e so ativamos por ESSE titulo - impossivel casar com janela
+' pre-existente. AppActivate retorna False se nao achar o titulo ainda
+' (janela demorando a subir) - tenta de novo por ate 2s antes de desistir.
+Dim marker, activated, attempts
+Randomize
+marker = "BibliotecaCmd_" & CStr(Int(Timer * 1000)) & "_" & CStr(Int(Rnd * 100000))
+
 Set shell = CreateObject("WScript.Shell")
-shell.Run "cmd.exe /k", 1, False
-WScript.Sleep 400
-shell.AppActivate "cmd.exe"
+shell.Run "cmd.exe /k title " & marker, 1, False
+
+activated = False
+attempts = 0
+Do While (Not activated) And (attempts < 20)
+    WScript.Sleep 100
+    activated = shell.AppActivate(marker)
+    attempts = attempts + 1
+Loop
+
+If Not activated Then
+    MsgBox "Nao consegui focar a janela do cmd que acabou de abrir. O comando ja esta' no clipboard - cole com Ctrl+V na janela e aperte Enter.", vbExclamation, "Biblioteca - foco falhou"
+    WScript.Quit 1
+End If
+
 WScript.Sleep 100
 shell.SendKeys EscapeSendKeys(decoded)
 If autoEnter Then shell.SendKeys "{ENTER}"
@@ -56,12 +82,32 @@ If autoEnter Then shell.SendKeys "{ENTER}"
 ' powershell -NoProfile -Command "cd '<path>'; claude [...]
 Const EXPECTED_PREFIX = "powershell -NoProfile -Command ""cd '"
 
+' cmd.exe trata &|<> como literal (nao como operador de encadeamento)
+' enquanto estiver dentro de uma regiao entre aspas duplas balanceadas -
+' e' assim que "-Command "..."" ja protege o payload inteiro (cd + claude
+' '<frase>') hoje. O bloqueio antigo (qualquer &|<> em QUALQUER lugar da
+' string) travava demanda legitima toda vez que a frase/link do Azure
+' colado tinha um "&" (bug real, 2026-09-01: link de work item com
+' querystring "?...&_a=edit" bloqueava o botao "Abrir Claude" do Nova
+' Task). O que continua perigoso de verdade e': (1) uma aspa dupla a mais
+' no meio, que fecharia a string do PowerShell cedo e devolveria o resto
+' pro cmd.exe como comando de verdade - por isso o payload nunca pode
+' ter uma 3a aspa dupla alem das 2 que delimitam ele (a que fecha
+' EXPECTED_PREFIX e a ultima do comando); (2) quebra de linha via
+' SendKeys, que equivale a apertar Enter no meio e nao tem protecao de
+' aspas nenhuma - continua bloqueada sempre, mesmo dentro do miolo.
 Function IsAllowedCommand(cmd)
-    Dim hasChainChar
-    hasChainChar = (InStr(cmd, "&") > 0) Or (InStr(cmd, "|") > 0) _
-        Or (InStr(cmd, "<") > 0) Or (InStr(cmd, ">") > 0) _
-        Or (InStr(cmd, Chr(13)) > 0) Or (InStr(cmd, Chr(10)) > 0)
-    IsAllowedCommand = (Left(cmd, Len(EXPECTED_PREFIX)) = EXPECTED_PREFIX) And (Not hasChainChar)
+    Dim prefixOk, endsWithQuote, inner, hasStrayQuote, hasLineBreak
+    prefixOk = (Left(cmd, Len(EXPECTED_PREFIX)) = EXPECTED_PREFIX)
+    endsWithQuote = (Len(cmd) > Len(EXPECTED_PREFIX)) And (Right(cmd, 1) = Chr(34))
+    If Not prefixOk Or Not endsWithQuote Then
+        IsAllowedCommand = False
+        Exit Function
+    End If
+    inner = Mid(cmd, Len(EXPECTED_PREFIX) + 1, Len(cmd) - Len(EXPECTED_PREFIX) - 1)
+    hasStrayQuote = InStr(inner, Chr(34)) > 0
+    hasLineBreak = (InStr(inner, Chr(13)) > 0) Or (InStr(inner, Chr(10)) > 0)
+    IsAllowedCommand = (Not hasStrayQuote) And (Not hasLineBreak)
 End Function
 
 Function UrlDecode(s)
