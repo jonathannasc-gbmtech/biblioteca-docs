@@ -165,7 +165,17 @@ function Write-BackfillResumo([PSCustomObject]$group) {
     $layer = Get-RepoLayer $group.Repo
     $prsSorted = @($group.Prs | Sort-Object Number -Descending)
     $latestSubject = $prsSorted[0].Subject
-    $slug = Get-Slug (if ($group.Cluster) { $group.Cluster } else { $latestSubject })
+    $slugSource = if ($group.Cluster) { $group.Cluster } else { $latestSubject }
+    $slug = Get-Slug $slugSource
+    # Cluster (scope/titulo fallback) e' frequentemente o MESMO texto em
+    # repos diferentes (ex.: scope de commit "gbma-107064" copiado igual
+    # numa mudanca espelhada em varios repos) - sem o repo no slug, 2 grupos
+    # cluster+repo diferentes colidiam no mesmo arquivo `general-{slug}.md`
+    # e um sobrescrevia o outro silenciosamente (bug real, 2026-09-01: 47
+    # "criado" logados, so 35 arquivos sobreviveram no disco). Slug de task
+    # numerica nao sofre disso na pratica (vem do titulo da ultima PR, que
+    # varia por repo mesmo pra tasks cross-repo) - fica como estava.
+    if ($group.Cluster) { $slug = "$slug-$(Get-Slug $group.Repo)" }
     $allMerged = @($group.Prs | Where-Object { $_.State -ne 'merged' }).Count -eq 0
     $status = if ($allMerged) { 'completed' } else { 'in_progress' }
 
@@ -225,6 +235,22 @@ $prLines
     $destDir = Join-Path $root "resumo\$layer"
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     $destPath = Join-Path $destDir $fileName
+
+    # Get-Slug trunca em 50 chars - 2 clusters/titulos DIFERENTES podem
+    # compartilhar o mesmo prefixo de 50 chars e colidir no mesmo arquivo
+    # mesmo depois do slug incluir o repo (bug real, 2026-09-01: mesma
+    # classe do bug de colisao entre repos, so que dentro do MESMO repo).
+    # Ultima trava antes de escrever: se o path ja existe (de uma rodada
+    # anterior OU de outro grupo processado nesta mesma execucao), sufixo
+    # numerico ate achar um nome livre - nunca sobrescreve silenciosamente.
+    if (Test-Path $destPath) {
+        $suffix = 2
+        do {
+            $fileName = "$($group.Task)-$slug-$suffix.md"
+            $destPath = Join-Path $destDir $fileName
+            $suffix++
+        } while (Test-Path $destPath)
+    }
 
     [IO.File]::WriteAllText($destPath, (Serialize-Frontmatter $meta) + $body)
     Sync-DocumentFile $destPath | Out-Null

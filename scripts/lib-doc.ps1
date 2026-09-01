@@ -215,7 +215,7 @@ function Serialize-Frontmatter($meta) {
     $lines = @('---')
     $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'stub', 'cluster', 'pseudo_task', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
     foreach ($key in $order) {
-        if (-not $meta.ContainsKey($key)) { continue }
+        if (-not $meta.Contains($key)) { continue }
         if ($key -eq 'related') {
             $relatedItems = @($meta['related'] | Where-Object { $_ })
             if ($relatedItems.Count -eq 0) { continue }
