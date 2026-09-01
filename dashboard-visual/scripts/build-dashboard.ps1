@@ -33,6 +33,38 @@ $starIcon = '<svg class="star-icon" viewBox="0 0 24 24" width="17" height="17"><
 $bookIcon = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.8c1.6-.9 3.6-1.3 5.5-1.3 1.7 0 3.4.4 4.5 1v14c-1.1-.6-2.8-1-4.5-1-1.9 0-3.9.4-5.5 1.3V4.8z"/><path d="M22 4.8c-1.6-.9-3.6-1.3-5.5-1.3-1.7 0-3.4.4-4.5 1v14c1.1-.6 2.8-1 4.5-1 1.9 0 3.9.4 5.5 1.3V4.8z"/></svg>'
 $chevronIcon = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>'
 
+# Padrao unico de lancamento (biblioteca-cmd-run:) - injetado no <script> de
+# TODA pagina com botao que abre um cmd novo (dashboard.html, resumo/*.html,
+# nova-task.html), fonte unica em vez de 3 copias que podiam divergir (foi
+# assim que o header "Abrir Claude" ficou com preventDefault+location.href
+# enquanto os outros usavam <a href> real - bug de janela dupla, 2026-09-01).
+# href sempre atualizado ANTES do clique nativo seguir - nunca
+# preventDefault + location.href de novo pra reabrir um protocolo
+# customizado (dispara o handler do SO 2x em alguns navegadores). Clipboard
+# e' so fallback assincrono pra maquina sem o protocolo registrado, nao
+# bloqueia a navegacao.
+$launchButtonJs = @'
+function biblLaunch(el, cmd) {
+  el.setAttribute('href', 'biblioteca-cmd-run:' + encodeURIComponent(cmd));
+  function fallback() {
+    var ta = document.createElement('textarea');
+    ta.value = cmd;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).catch(fallback);
+  } else {
+    fallback();
+  }
+  var original = el.textContent;
+  el.textContent = 'Abrindo...';
+  setTimeout(function () { el.textContent = original; }, 1500);
+}
+'@
+
 # Favicon - livro verde vibrante, mesmo desenho do $bookIcon (silhueta) mas
 # preenchido (stroke fino some em 16x16) - vai pra aba do navegador/favoritos.
 $faviconSvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%2322c55e' d='M2 4.8c1.6-.9 3.6-1.3 5.5-1.3 1.7 0 3.4.4 4.5 1v14c-1.1-.6-2.8-1-4.5-1-1.9 0-3.9.4-5.5 1.3V4.8z'/><path fill='%2316a34a' d='M22 4.8c-1.6-.9-3.6-1.3-5.5-1.3-1.7 0-3.4.4-4.5 1v14c1.1-.6 2.8-1 4.5-1 1.9 0 3.9.4 5.5 1.3V4.8z'/></svg>"
@@ -75,6 +107,38 @@ function Get-TaskSiblings([PSCustomObject]$card) {
     return $siblings
 }
 
+# Classifica um nome de repo pela convencao GBM (sufixo -backend, prefixo
+# mfe-/mobile-, ou "migrations") - fonte unica usada tanto pelo icone do PR
+# (Get-PrKindInfo) quanto pelo rotulo curto de camada no titulo do card
+# (Build-Card/Build-SummaryHtml, taskLabel). $null se o nome nao bater com
+# nenhuma convencao conhecida (repo pessoal, nome atipico etc.).
+function Get-RepoLayer([string]$repo) {
+    if (-not $repo) { return $null }
+    if ($repo -match '-backend$') { return 'backend' }
+    if ($repo -match 'migrations') { return 'migrations' }
+    if ($repo -match '^(gbm-)?(mfe|mobile)-') { return 'frontend' }
+    return $null
+}
+$script:RepoLayerLabels = @{ backend = 'Backend'; frontend = 'Frontend'; migrations = 'Migrations' }
+
+# Nome do arquivo summaries/*.html de um card - sufixado pela camada
+# (Get-RepoLayer) quando reconhecida, pra nao colidir quando o backend e
+# o frontend (ou migrations) da mesma task usam o mesmo slug de arquivo
+# (`resumo/backend/X.md` e `resumo/frontend/X.md` geravam os DOIS
+# `summaries/X.html`, um sobrescrevendo o outro no disco - bug real,
+# confirmado em 3 tasks: 103269, 104689, 104691). Sem camada reconhecida
+# (repo fora da convencao), mantem o nome antigo sem sufixo - nao regride
+# quem nunca colidiu. Fonte unica usada pelo loop que escreve os arquivos
+# e por todo lugar que linka pra eles (Get-RelatedTasksHtml, Build-Card,
+# Build-QaRoundCard, Build-UnifiedQaRoundCard).
+function Get-SummaryFileName([PSCustomObject]$card) {
+    if (-not $card.ResumoDoc) { return $null }
+    $baseName = [IO.Path]::GetFileNameWithoutExtension($card.ResumoDoc.Path)
+    $layer = Get-RepoLayer $card.Repo
+    if ($layer) { return "$baseName-$layer.html" }
+    return "$baseName.html"
+}
+
 # Classifica o PR pelo nome do repo na propria URL - sem depender de campo
 # novo no frontmatter. Fallback pro icone generico do github se o nome nao
 # bater com nenhuma convencao conhecida (repo pessoal, nome atipico etc.).
@@ -83,10 +147,12 @@ function Get-PrKindInfo([string]$prUrl) {
         return [PSCustomObject]@{ Icon = $githubIcon; Title = 'PR'; Layer = $null }
     }
     $repo = $Matches[1]
-    if ($repo -match '-backend$') { return [PSCustomObject]@{ Icon = $backendIcon; Title = 'PR de backend'; Layer = 'backend' } }
-    if ($repo -match 'migrations') { return [PSCustomObject]@{ Icon = $migrationIcon; Title = 'PR de migration'; Layer = 'migrations' } }
-    if ($repo -match '^(gbm-)?(mfe|mobile)-') { return [PSCustomObject]@{ Icon = $frontendIcon; Title = 'PR de frontend'; Layer = 'frontend' } }
-    return [PSCustomObject]@{ Icon = $githubIcon; Title = 'PR'; Layer = $null }
+    switch (Get-RepoLayer $repo) {
+        'backend' { return [PSCustomObject]@{ Icon = $backendIcon; Title = 'PR de backend'; Layer = 'backend' } }
+        'migrations' { return [PSCustomObject]@{ Icon = $migrationIcon; Title = 'PR de migration'; Layer = 'migrations' } }
+        'frontend' { return [PSCustomObject]@{ Icon = $frontendIcon; Title = 'PR de frontend'; Layer = 'frontend' } }
+        default { return [PSCustomObject]@{ Icon = $githubIcon; Title = 'PR'; Layer = $null } }
+    }
 }
 
 # 4 badges de status por camada (migrations/backend/frontend/testes) da
@@ -98,10 +164,11 @@ function Get-PrKindInfo([string]$prUrl) {
 function Get-LayerStatusHtml([PSCustomObject]$card) {
     $siblings = Get-TaskSiblings $card
 
-    # $card.Signals.PRs ja vem agregado entre irmaos (ver loop logo apos
-    # $cardsByTask/$cardsByCluster serem montados) - so os docs (pra checar
-    # estado/testes) ainda precisam da lista de irmaos aqui.
-    $allPrs = @($card.Signals.PRs)
+    # Uniao dos PRs de todos os irmaos, montada aqui (card.Signals.PRs NAO
+    # vem mais agregado - ver nota logo apos $cardsByTask/$cardsByCluster
+    # serem montados) - o painel de status por camada precisa ver a task
+    # inteira mesmo quando chamado a partir do card de um unico repo.
+    $allPrs = @($siblings | ForEach-Object { $_.Signals.PRs } | Select-Object -Unique)
     $allDocs = New-Object System.Collections.Generic.List[object]
     foreach ($s in $siblings) {
         foreach ($d in $s.Docs) { $allDocs.Add($d) }
@@ -194,7 +261,11 @@ function Get-LayerStatusHtml([PSCustomObject]$card) {
 # Pills de links externos (Azure DevOps + PR do GitHub, com cor por estado
 # real - aberto/mergeado/rejeitado). Compartilhada entre o card da grade e a
 # pagina de resumo, pra nao duplicar a logica de cor em dois lugares.
-function Get-ExtLinksHtml([PSCustomObject]$card) {
+# -AllSiblings: mostra a uniao de PRs de todos os irmaos da mesma task
+# (todos os repos) - so' a pagina de resumo usa isso, o "principal" que
+# mostra tudo. Sem o switch (default, usado pelo card da grade), mostra
+# so' os PRs do proprio repo desse card.
+function Get-ExtLinksHtml([PSCustomObject]$card, [switch]$AllSiblings) {
     $extLinks = New-Object System.Collections.Generic.List[string]
     if ($azureBase -and $card.Task -match '^\d+$') {
         $azureUrl = "$azureBase/$($card.Task)"
@@ -210,7 +281,14 @@ function Get-ExtLinksHtml([PSCustomObject]$card) {
         foreach ($d in $s.Docs) { $cardDocsForState.Add($d) }
         if ($s.ResumoDoc) { $cardDocsForState.Add($s.ResumoDoc) }
     }
-    foreach ($pr in $card.Signals.PRs) {
+    $prList = if ($AllSiblings) {
+        $merged = New-Object System.Collections.Generic.List[string]
+        foreach ($s in (Get-TaskSiblings $card)) {
+            foreach ($pr in $s.Signals.PRs) { if (-not $merged.Contains($pr)) { $merged.Add($pr) } }
+        }
+        @($merged)
+    } else { @($card.Signals.PRs) }
+    foreach ($pr in $prList) {
         $num = if ($pr -match '(\d+)$') { $Matches[1] } else { '' }
         # cor por estado real (igual GitHub: aberto=verde, mergeado=roxo,
         # fechado sem merge=vermelho) - olha o frontmatter dos docs do card,
@@ -246,7 +324,7 @@ function Get-RelatedTasksHtml([PSCustomObject]$card) {
 
     $items = $siblings | ForEach-Object {
         if ($_.ResumoDoc) {
-            $href = [IO.Path]::GetFileNameWithoutExtension($_.ResumoDoc.Path) + '.html'
+            $href = Get-SummaryFileName $_
             $title = 'Ver resumo'
             $typeLabel = 'Resumo'
         } else {
@@ -332,40 +410,72 @@ if ($pending.Count -gt 0) {
     }
     foreach ($doc in $pending) {
         if (-not $ghAvailable) { continue }
-        if ($doc.PrPending -notmatch 'github\.com/([^/]+)/([^/]+)/pull/(\d+)') {
+        # pr_pending pode ter VARIAS URLs (task "migration espelho" - 1 PR
+        # por ambiente, separadas por espaco no mesmo campo). Checar TODAS,
+        # nao so' a primeira - senao a 1a mergear ja fecha a task inteira e
+        # apaga o rastro das URLs restantes ainda abertas (bug real,
+        # encontrado 2026-08-25).
+        $urls = @([regex]::Matches($doc.PrPending, $prLinkPattern) | ForEach-Object { $_.Value })
+        if ($urls.Count -eq 0) {
             Write-Host "dashboard: pr_pending com formato inesperado em $($doc.Path): $($doc.PrPending)" -ForegroundColor Yellow
             continue
         }
-        $ghRepo = "$($Matches[1])/$($Matches[2])"
-        $prNumber = $Matches[3]
-        try {
-            $json = gh pr view $prNumber --repo $ghRepo --json state 2>$null | ConvertFrom-Json
-        } catch { $json = $null }
-        if (-not $json -or $json.state -eq 'OPEN') { continue }
+        $stillPending = New-Object System.Collections.Generic.List[string]
+        $newlyMerged = New-Object System.Collections.Generic.List[string]
+        $newlyRejected = New-Object System.Collections.Generic.List[string]
+        $anyResolved = $false
+        foreach ($url in $urls) {
+            if ($url -notmatch 'github\.com/([^/]+)/([^/]+)/pull/(\d+)') { $stillPending.Add($url); continue }
+            $ghRepo = "$($Matches[1])/$($Matches[2])"
+            $prNumber = $Matches[3]
+            try {
+                $json = gh pr view $prNumber --repo $ghRepo --json state 2>$null | ConvertFrom-Json
+            } catch { $json = $null }
+            if (-not $json -or $json.state -eq 'OPEN') { $stillPending.Add($url); continue }
+            $anyResolved = $true
+            if ($json.state -eq 'MERGED') { $newlyMerged.Add($url) } else { $newlyRejected.Add($url) }
+        }
+        if (-not $anyResolved) { continue }
 
         $raw = [IO.File]::ReadAllText($doc.Path)
         $parsed = Parse-Frontmatter $raw
         if (-not $parsed) { continue }
         $meta = $parsed.Meta
-        $meta.Remove('pr_pending')
         $body = Get-ContentBody $parsed.Body
 
-        if ($json.state -eq 'MERGED') {
-            $meta['status'] = 'completed'
-            $meta['pr_merged'] = $doc.PrPending
-            $note = 'Mergeado em `develop`/`production` (deteccao automatica) - sem pendencia de codigo, so ajustes se vier retorno de QA.'
-            $doc.Status = 'completed'
-            $doc.PrMerged = $doc.PrPending
-            $verb = 'mergeado'
-        } else {
-            # CLOSED sem merge = rejeitado. Nao flipa status (fechado != task resolvida
-            # nem abandonada, so' quem decide isso e' o usuario) - so' marca pra cor.
-            $meta['pr_rejected'] = $doc.PrPending
-            $note = 'PR fechado sem merge (deteccao automatica) - revisar o que fazer com a task.'
-            $doc.PrRejected = $doc.PrPending
-            $verb = 'fechado sem merge'
+        # Acumula com o que ja existia no campo (nao sobrescreve - uma
+        # rodada anterior do sweep pode ja ter marcado outras URLs).
+        if ($newlyMerged.Count -gt 0) {
+            $prior = if ($doc.PrMerged) { $doc.PrMerged.Trim() + ' ' } else { '' }
+            $meta['pr_merged'] = ($prior + ($newlyMerged -join ' ')).Trim()
+            $doc.PrMerged = $meta['pr_merged']
         }
-        if ($body -notmatch '(?:Mergeado em|PR fechado sem merge)') {
+        if ($newlyRejected.Count -gt 0) {
+            $prior = if ($doc.PrRejected) { $doc.PrRejected.Trim() + ' ' } else { '' }
+            $meta['pr_rejected'] = ($prior + ($newlyRejected -join ' ')).Trim()
+            $doc.PrRejected = $meta['pr_rejected']
+        }
+
+        $note = $null
+        if ($stillPending.Count -eq 0) {
+            $meta.Remove('pr_pending')
+            $doc.PrPending = ''
+            if ($newlyRejected.Count -eq 0) {
+                # Todas as URLs mergearam, nenhuma rejeitada - so' ENTAO
+                # fecha a task. Se sobrou alguma rejeitada junto das
+                # mergeadas, e' estado misto - nao flipa status sozinho,
+                # mesmo principio do PR unico fechado sem merge (quem
+                # decide o que fazer e' o usuario).
+                $meta['status'] = 'completed'
+                $doc.Status = 'completed'
+                $note = 'Mergeado em `develop`/`production` (deteccao automatica) - sem pendencia de codigo, so ajustes se vier retorno de QA.'
+            }
+        } else {
+            $meta['pr_pending'] = ($stillPending -join ' ')
+            $doc.PrPending = $meta['pr_pending']
+        }
+
+        if ($note -and $body -notmatch '(?:Mergeado em|PR fechado sem merge)') {
             if ($body -match '(?m)^# .*$') {
                 $m = [regex]::Match($body, '(?m)^# .*$')
                 $insertAt = $m.Index + $m.Length
@@ -376,41 +486,79 @@ if ($pending.Count -gt 0) {
         [IO.File]::WriteAllText($doc.Path, (Serialize-Frontmatter $meta) + $body)
         Sync-DocumentFile $doc.Path | Out-Null
 
-        $doc.PrPending = ''
-        Write-Host "dashboard: PR #$prNumber ($ghRepo) $verb - $($doc.Path.Substring($root.Length + 1)) atualizado automaticamente."
+        $resolvedCount = $newlyMerged.Count + $newlyRejected.Count
+        Write-Host "dashboard: $resolvedCount/$($urls.Count) PR(s) resolvido(s) ($($newlyMerged.Count) mergeado(s), $($newlyRejected.Count) rejeitado(s)) - $($doc.Path.Substring($root.Length + 1)) atualizado automaticamente."
     }
 }
 
-# Backfill (1x por doc): link de PR encontrado no corpo (jeito antigo, so' texto
-# solto, sem pr_pending/pr_merged/pr_rejected) tem estado desconhecido pro pill
-# colorido. Confere 1 vez via `gh` e grava o resultado no frontmatter - depois
-# disso nunca mais custa rede pra esse doc (mesma guarda barata do sweep acima).
-$unknown = @($all | Where-Object { -not $_.PrPending -and -not $_.PrMerged -and -not $_.PrRejected -and $_.Body -match $prLinkPattern })
+# Backfill INCREMENTAL (nao 1x por doc): link de PR encontrado no corpo
+# (jeito antigo, so' texto solto) mas AINDA nao coberto por nenhum dos 3
+# campos (pr_pending/pr_merged/pr_rejected) tem estado desconhecido pro
+# pill colorido. Roda em QUALQUER sync-all.ps1, de qualquer task/sessao -
+# nao so' verifica os PRs pendentes conhecidos (sweep acima), mas tambem
+# descobre PR que foi mencionado em prosa e nunca ganhou campo nenhum
+# (fix de review em PR separado, por exemplo). Guarda por LINK, nao por
+# doc: um doc que ja tem `pr_merged` com 1 URL ainda entra aqui se o
+# corpo mencionar uma 2a URL que esse campo nao cobre - a guarda antiga
+# ("doc ja tem qualquer campo preenchido = nunca mais confere") deixava
+# PR novo em doc antigo pendurado cinza pra sempre (bug real, encontrado
+# manualmente 2026-08-25 em 4 PRs - #300/#394/#395/#176 - o motivo desta
+# reescrita: "verificar de uma vez, sem precisar voltar depois").
+$unknown = @($all | Where-Object {
+    if ($_.Body -notmatch $prLinkPattern) { return $false }
+    $knownUrls = "$($_.PrPending) $($_.PrMerged) $($_.PrRejected)"
+    @([regex]::Matches($_.Body, $prLinkPattern) | ForEach-Object { $_.Value } | Where-Object { -not $knownUrls.Contains($_) }).Count -gt 0
+})
 if ($unknown.Count -gt 0) {
     $ghAvailable = $null -ne (Get-Command gh -ErrorAction SilentlyContinue)
     foreach ($doc in $unknown) {
         if (-not $ghAvailable) { break }
-        $link = [regex]::Match($doc.Body, $prLinkPattern).Value
-        if ($link -notmatch 'github\.com/([^/]+)/([^/]+)/pull/(\d+)') { continue }
-        $ghRepo = "$($Matches[1])/$($Matches[2])"
-        $prNumber = $Matches[3]
-        try {
-            $json = gh pr view $prNumber --repo $ghRepo --json state 2>$null | ConvertFrom-Json
-        } catch { $json = $null }
-        if (-not $json) { continue }
+        # So' os links que AINDA nao estao em nenhum dos 3 campos - nao
+        # re-consulta `gh` pra link ja conhecido (mesma guarda barata de
+        # rede de antes, so' que por link, nao por doc inteiro).
+        $knownUrls = "$($doc.PrPending) $($doc.PrMerged) $($doc.PrRejected)"
+        $links = @([regex]::Matches($doc.Body, $prLinkPattern) | ForEach-Object { $_.Value } | Select-Object -Unique | Where-Object { -not $knownUrls.Contains($_) })
+        if ($links.Count -eq 0) { continue }
+        $merged = New-Object System.Collections.Generic.List[string]
+        $rejected = New-Object System.Collections.Generic.List[string]
+        $stillPending = New-Object System.Collections.Generic.List[string]
+        foreach ($link in $links) {
+            if ($link -notmatch 'github\.com/([^/]+)/([^/]+)/pull/(\d+)') { continue }
+            $ghRepo = "$($Matches[1])/$($Matches[2])"
+            $prNumber = $Matches[3]
+            try {
+                $json = gh pr view $prNumber --repo $ghRepo --json state 2>$null | ConvertFrom-Json
+            } catch { $json = $null }
+            if (-not $json) { continue }
+            if ($json.state -eq 'MERGED') { $merged.Add($link) }
+            elseif ($json.state -eq 'CLOSED') { $rejected.Add($link) }
+            else { $stillPending.Add($link) }
+        }
+        if ($merged.Count -eq 0 -and $rejected.Count -eq 0 -and $stillPending.Count -eq 0) { continue }
 
         $raw = [IO.File]::ReadAllText($doc.Path)
         $parsed = Parse-Frontmatter $raw
         if (-not $parsed) { continue }
         $meta = $parsed.Meta
-        if ($json.state -eq 'MERGED') { $meta['pr_merged'] = $link; $doc.PrMerged = $link }
-        elseif ($json.state -eq 'CLOSED') { $meta['pr_rejected'] = $link; $doc.PrRejected = $link }
-        else { $meta['pr_pending'] = $link; $doc.PrPending = $link }
+        # Acumula com o que ja existia - nunca sobrescreve (doc que ja
+        # tinha pr_merged com outra URL continua com as duas).
+        if ($merged.Count -gt 0) {
+            $prior = if ($doc.PrMerged) { $doc.PrMerged.Trim() + ' ' } else { '' }
+            $meta['pr_merged'] = ($prior + ($merged -join ' ')).Trim(); $doc.PrMerged = $meta['pr_merged']
+        }
+        if ($rejected.Count -gt 0) {
+            $prior = if ($doc.PrRejected) { $doc.PrRejected.Trim() + ' ' } else { '' }
+            $meta['pr_rejected'] = ($prior + ($rejected -join ' ')).Trim(); $doc.PrRejected = $meta['pr_rejected']
+        }
+        if ($stillPending.Count -gt 0) {
+            $prior = if ($doc.PrPending) { $doc.PrPending.Trim() + ' ' } else { '' }
+            $meta['pr_pending'] = ($prior + ($stillPending -join ' ')).Trim(); $doc.PrPending = $meta['pr_pending']
+        }
         [IO.File]::WriteAllText($doc.Path, (Serialize-Frontmatter $meta) + (Get-ContentBody $parsed.Body))
         Sync-DocumentFile $doc.Path | Out-Null
     }
     if ($ghAvailable) {
-        Write-Host "dashboard: backfill de estado de PR - $($unknown.Count) doc(s) verificado(s) 1a vez."
+        Write-Host "dashboard: backfill de estado de PR - $($unknown.Count) doc(s) com link novo verificado(s)."
     }
 }
 
@@ -454,7 +602,7 @@ foreach ($g in $groups) {
     $latestTime = $latestDoc.UpdatedTime
     # PR, Azure e o status por camada (Get-LayerStatusHtml) aparecem em
     # Ativas E Completas por igual - nenhum e' restrito a tasks ativas.
-    $signals = Get-Signals $docs
+    $signals = Get-Signals $docs $rep.Task
     # cluster opcional (so faz diferenca pra task "general" - o card mostra
     # "Geral" por padrao, sem jeito de distinguir varios de cor no dashboard;
     # qualquer doc do grupo com `cluster:` no frontmatter vira o titulo do card
@@ -499,26 +647,38 @@ foreach ($c in $cards) {
     }
 }
 
-# PRs de um card sao a UNIAO dos PRs de todos os cards irmaos da mesma
-# task (nao so' os PRs mencionados nos docs daquele repo especifico) -
-# sem isso, uma task multi-repo mostra PRs diferentes em cada card (o
-# card do frontend nunca via os PRs do backend e vice-versa, mesmo a task
-# inteira ja estando 100% mergeada). Roda depois do agrupamento acima,
-# antes de qualquer Build-Card/Get-ExtLinksHtml/Get-LayerStatusHtml -
-# os tres passam a enxergar a lista completa automaticamente.
-foreach ($c in $cards) {
-    $siblings = Get-TaskSiblings $c
-    if ($siblings.Count -le 1) { continue }
-    $merged = New-Object System.Collections.Generic.List[string]
-    foreach ($s in $siblings) {
-        foreach ($pr in $s.Signals.PRs) { if (-not $merged.Contains($pr)) { $merged.Add($pr) } }
-    }
-    $c.Signals.PRs = @($merged)
-}
+# NOTA: card.Signals.PRs NAO e mais sobrescrito com a uniao dos irmaos
+# aqui - cada card volta a expor so' os PRs do proprio repo (Get-ExtLinksHtml
+# na grade). A uniao cross-repo agora e' calculada sob demanda: dentro de
+# Get-LayerStatusHtml (sempre, painel de status por camada - compacto,
+# faz sentido em qualquer card da task) e dentro de Get-ExtLinksHtml so'
+# quando chamada com -AllSiblings (pagina de resumo, o "principal" que
+# mostra todos os PRs da task inteira). Decisao 2026-08-25: card da grade
+# poluia (lista de ~13 PRs identica nos 3 cards de uma task multi-repo,
+# mesmo cada card sendo de 1 repo so') - resumo ja tinha Get-RelatedTasksHtml
+# linkando pros outros repos da mesma task, virou o lugar natural pra
+# mostrar a lista completa.
 
 # Conversor leve pro corpo das secoes do resumo - nao e' um motor de
 # markdown generico, so o suficiente pro que um agente escreve ali:
 # paragrafos, bullets, **bold**, [texto](url http/https).
+function Format-InlineMd([string]$s) {
+    $c = Esc $s
+    $c = $c -replace '\[([^\]]+)\]\((https?://[^)]+)\)', '<a href="$2" target="_blank">$1</a>'
+    $c = $c -replace '\*\*([^*]+)\*\*', '<strong>$1</strong>'
+    $c = $c -replace '`([^`]+)`', '<code>$1</code>'
+    return $c
+}
+
+# Nao e' um motor de markdown generico, so o suficiente pro que um agente
+# escreve ali: paragrafos, bullets, **bold**, [texto](url http/https).
+# Junta linhas fisicas consecutivas (prosa hard-wrapped ~80 chars, convencao
+# de todo doc da Biblioteca) numa unica <p> - bug real corrigido 2026-08-25:
+# a versao anterior tratava CADA quebra de linha do markdown-fonte como um
+# paragrafo novo (1 <p> por linha fisica, nao por paragrafo logico),
+# fragmentando toda secao de resumo da Biblioteca inteira em dezenas de
+# <p> de 1 linha cada. So' quebra paragrafo em linha em branco de verdade
+# ou ao entrar/sair de uma lista.
 function Convert-SectionHtml([string]$text) {
     $text = if ($text) { $text.Trim() } else { '' }
     # tira comentarios HTML (ex: dica de preenchimento deixada no template)
@@ -527,24 +687,45 @@ function Convert-SectionHtml([string]$text) {
     if (-not $text) { return '<p class="empty">(vazio)</p>' }
     $lines = $text -split "`r?`n"
     $htmlLines = New-Object System.Collections.Generic.List[string]
+    $paraBuffer = New-Object System.Collections.Generic.List[string]
+    $listItemBuffer = New-Object System.Collections.Generic.List[string]
     $inList = $false
-    foreach ($line in $lines) {
-        $t = $line.Trim()
-        if (-not $t) { continue }
-        $isBullet = $t -match '^[-*]\s+(.*)'
-        $content = if ($isBullet) { $Matches[1] } else { $t }
-        $content = Esc $content
-        $content = $content -replace '\[([^\]]+)\]\((https?://[^)]+)\)', '<a href="$2" target="_blank">$1</a>'
-        $content = $content -replace '\*\*([^*]+)\*\*', '<strong>$1</strong>'
-        $content = $content -replace '`([^`]+)`', '<code>$1</code>'
-        if ($isBullet) {
-            if (-not $inList) { $htmlLines.Add('<ul>'); $inList = $true }
-            $htmlLines.Add("<li>$content</li>")
-        } else {
-            if ($inList) { $htmlLines.Add('</ul>'); $inList = $false }
-            $htmlLines.Add("<p>$content</p>")
+
+    function Flush-Para {
+        if ($paraBuffer.Count -gt 0) {
+            $htmlLines.Add("<p>$(Format-InlineMd ($paraBuffer -join ' '))</p>")
+            $paraBuffer.Clear()
         }
     }
+    function Flush-ListItem {
+        if ($listItemBuffer.Count -gt 0) {
+            $htmlLines.Add("<li>$(Format-InlineMd ($listItemBuffer -join ' '))</li>")
+            $listItemBuffer.Clear()
+        }
+    }
+
+    foreach ($line in $lines) {
+        $t = $line.Trim()
+        if (-not $t) { Flush-ListItem; Flush-Para; continue }
+        $isBullet = $t -match '^[-*]\s+(.*)'
+        if ($isBullet) {
+            Flush-Para
+            Flush-ListItem
+            if (-not $inList) { $htmlLines.Add('<ul>'); $inList = $true }
+            $listItemBuffer.Add($Matches[1])
+        } elseif ($inList -and $listItemBuffer.Count -gt 0) {
+            # Continuacao do item de lista atual (linha indentada sem
+            # marcador, mesma convencao de todo doc da Biblioteca - "- foo"
+            # seguido de linhas com 2 espacos de indentacao, sem linha em
+            # branco entre elas).
+            $listItemBuffer.Add($t)
+        } else {
+            if ($inList) { Flush-ListItem; $htmlLines.Add('</ul>'); $inList = $false }
+            $paraBuffer.Add($t)
+        }
+    }
+    Flush-ListItem
+    Flush-Para
     if ($inList) { $htmlLines.Add('</ul>') }
     return ($htmlLines -join "`n")
 }
@@ -566,6 +747,322 @@ function Get-ResumoSections([string]$body) {
     return $sections
 }
 
+# Dados de "Rodadas de QA" - le as secoes "## Ajustes QA - rodada N" que
+# ja existem nos docs `testes/` do proprio card (mesmo repo, task-hub-qa
+# ja grava uma por rodada) e devolve um objeto por rodada (numero, data,
+# teaser, PRs mencionados so' NAQUELA secao, doc de origem). Nao cria doc
+# novo nem campo novo - so' le o que ja existe. Consumido por
+# Build-QaRoundCard pra virar card de verdade na grade principal (nao
+# fica escondido so' na pagina de resumo).
+# Acha o campo `- **Label:** texto` (bullet opcional) dentro de uma secao
+# de rodada de QA - junta linhas de continuacao (mesma convencao de
+# indentacao/wrap de todo doc da Biblioteca), para no proximo campo em
+# negrito ou linha em branco. $null se o label nao existir na secao
+# (rodada ainda no formato antigo, sem os 3 campos padronizados).
+function Get-QaFieldValue([string]$sectionBody, [string]$label) {
+    $lines = $sectionBody -split "`r?`n"
+    $labelPattern = "^-?\s*\*\*$([regex]::Escape($label)):\*\*\s*(.*)$"
+    # Fronteira = qualquer bullet novo (com ou sem label em negrito) ou
+    # label solto sem bullet - continuacao de verdade nesta convencao
+    # nunca comeca com "-" (e' sempre texto indentado simples). Sem
+    # cobrir "^-\s" aqui, um bullet extra sem negrito logo depois do
+    # campo (ex.: "- Detalhe completo: ver...") era engolido como se
+    # fosse continuacao do campo anterior (bug real, 2026-08-25).
+    $boundaryPattern = '^-\s|^\*\*'
+    $collecting = $false
+    $buffer = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $lines) {
+        $t = $line.Trim()
+        if ($collecting) {
+            if (-not $t -or $t -match $boundaryPattern) { break }
+            $buffer.Add($t)
+            continue
+        }
+        if ($t -match $labelPattern) {
+            $collecting = $true
+            $first = $Matches[1].Trim()
+            if ($first) { $buffer.Add($first) }
+        }
+    }
+    if ($buffer.Count -eq 0) { return $null }
+    $joined = ($buffer -join ' ') -replace '\*\*([^*]+)\*\*', '$1' -replace '`([^`]+)`', '$1' -replace '\[([^\]]+)\]\(https?://[^)]+\)', '$1'
+    return $joined.Trim()
+}
+
+# HTML de exibicao de UMA rodada de QA - cada campo (Reportado/Causa
+# raiz/Corrigido) em linha propria com label em negrito, junto via <br>
+# dentro do MESMO <p> (nao 3 <p> separados) - assim o clamp/expand por
+# linha do CSS (.func, .card.expanded .func) continua funcionando sem
+# precisar reimplementar o mecanismo pra um container com filhos. Cai
+# pro teaser bruto (1o paragrafo, ja sem markdown) quando a rodada nao
+# tem os campos padronizados ainda.
+function Get-QaFieldsHtml([PSCustomObject]$round) {
+    if ($round.Reportado) {
+        $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add("<strong>Reportado:</strong> $(Esc $round.Reportado)")
+        if ($round.CausaRaiz) { $lines.Add("<strong>Causa raiz:</strong> $(Esc $round.CausaRaiz)") }
+        if ($round.Corrigido) { $lines.Add("<strong>Corrigido:</strong> $(Esc $round.Corrigido)") }
+        return $lines -join '<br>'
+    }
+    return Esc $round.Teaser
+}
+
+# Mesmo conteudo de Get-QaFieldsHtml, mas texto puro (sem HTML) - pro
+# indice de busca (data-search), nunca pra exibicao.
+function Get-QaSearchText([PSCustomObject]$round) {
+    if ($round.Reportado) {
+        $parts = New-Object System.Collections.Generic.List[string]
+        $parts.Add("Reportado: $($round.Reportado)")
+        if ($round.CausaRaiz) { $parts.Add("Causa raiz: $($round.CausaRaiz)") }
+        if ($round.Corrigido) { $parts.Add("Corrigido: $($round.Corrigido)") }
+        return $parts -join ' '
+    }
+    return $round.Teaser
+}
+
+function Get-QaRounds([PSCustomObject]$card) {
+    $testesDocs = @($card.Docs | Where-Object { $_.Type -eq 'testes' })
+    if ($testesDocs.Count -eq 0) { return @() }
+
+    $rounds = New-Object System.Collections.Generic.List[object]
+    foreach ($doc in $testesDocs) {
+        $parts = $doc.Body -split '(?m)(?=^## )'
+        $roundIndex = 0
+        foreach ($p in $parts) {
+            $firstLine = ($p -split "`n")[0]
+            if ($firstLine -notmatch 'Ajustes QA') { continue }
+            $roundIndex++
+            # Numero da rodada vem do proprio heading quando existe
+            # ("rodada N") - so' cai pro contador posicional se a secao
+            # nao foi numerada (task-hub-qa permite a 1a rodada sem
+            # numero, ver SKILL.md).
+            $roundNum = if ($firstLine -match 'rodada\s+(\d+)') { $Matches[1] } else { "$roundIndex" }
+            $dateLabel = if ($firstLine -match '(\d{4}-\d{2}-\d{2})') { $Matches[1] } else { $doc.Updated }
+
+            # Campos padronizados: Reportado/Causa raiz/Corrigido (formato
+            # obrigatorio no task-hub-qa, ver SKILL.md) - mantidos
+            # SEPARADOS aqui (nao junta numa string so') pra quem
+            # renderiza o card (Get-QaFieldsHtml) poder formatar cada um
+            # em linha propria com label em negrito - um paragrafo so'
+            # com tudo junto (jeito anterior) ficava dificil de ler.
+            # $teaser (1o paragrafo bruto) e' so' o fallback pra rodada
+            # que ainda nao foi migrada pro formato novo (Reportado
+            # ausente). Texto sempre COMPLETO, sem cortar aqui - o corte
+            # visual (clamp + botao de expandir) e' so' CSS/JS no card.
+            $reportado = Get-QaFieldValue $p 'Reportado'
+            $causaRaiz = if ($reportado) { Get-QaFieldValue $p 'Causa raiz' } else { $null }
+            $corrigido = if ($reportado) { Get-QaFieldValue $p 'Corrigido' } else { $null }
+            $teaser = if (-not $reportado) {
+                $bodyText = ($p -split "`n", 2)[1]
+                $firstPara = if ($bodyText) { (($bodyText.Trim() -split "`r?`n`r?`n")[0] -replace '\s+', ' ').Trim() } else { '' }
+                $firstPara -replace '\*\*([^*]+)\*\*', '$1' -replace '`([^`]+)`', '$1' -replace '\[([^\]]+)\]\(https?://[^)]+\)', '$1'
+            } else { $null }
+
+            # PRs so' dessa rodada (regex escopada ao texto da secao $p,
+            # nao ao doc inteiro) - e' isso que faz o card da rodada
+            # mostrar so' o que e' relevante pra ela, nao a lista inteira
+            # do repo (mesmo motivo da mudanca de Get-ExtLinksHtml desta
+            # sessao).
+            $prs = New-Object System.Collections.Generic.List[string]
+            foreach ($m in [regex]::Matches($p, 'https?://github\.com/\S*?/pull/\d+')) {
+                if (-not $prs.Contains($m.Value)) { $prs.Add($m.Value) }
+            }
+
+            $rounds.Add([PSCustomObject]@{
+                RoundNum  = $roundNum
+                DateLabel = $dateLabel
+                Reportado = $reportado
+                CausaRaiz = $causaRaiz
+                Corrigido = $corrigido
+                Teaser    = $teaser
+                PRs       = @($prs)
+                TestesDoc = $doc
+            })
+        }
+    }
+    # .ToArray(), nao @($rounds) - nesta maquina, @() aplicado direto
+    # (fora de pipeline) sobre List[object] lanca "Os tipos de argumento
+    # nao correspondem" (ArgumentException), diferente de List[string]
+    # (funciona) ou de uma lista passada por pipeline antes do @() (ver
+    # padrao @($allDocs | Where-Object {...}) usado no resto do arquivo -
+    # esse funciona pq o pipe ja converteu pra stream antes do @()).
+    return $rounds.ToArray()
+}
+
+# Card de verdade na grade principal (Ativas/Completas, mesma secao do
+# card "pai" do repo) representando UMA rodada de QA - nao entra no
+# array $cards (evita mexer em contagem/sweep/favorito, que sao pensados
+# pra card de repo, nao de rodada), so' e' renderizado logo depois do
+# card do repo no HTML final (ver loop de $activeHtml/$doneHtml). Mesmo
+# funcionamento do card normal (Build-Card): nasce fechado, mesmo botao
+# de expandir/recolher (bug 2026-09-01: nascia com `expanded` fixo no
+# HTML, revertia sozinho pro estado expandido a cada rebuild/reload
+# mesmo se o usuario tivesse fechado - card normal e card de QA numa
+# mesma linha da grade ficavam com alturas inconsistentes por causa
+# disso). Botao de acao e' so' "Reabrir p/ QA" (mesmo
+# comando do card do repo, task+repo - nao existe granularidade menor
+# pra "retomar exatamente aquela rodada", a branch da rodada geralmente
+# ja foi mergeada/deletada). Icone de resumo aponta pro MESMO resumo do
+# card pai (nao existe resumo por rodada) - pedido explicito do usuario.
+# Pill de PR (icone por camada + cor por estado real) pra UM link - usada
+# por Build-QaRoundCard e Build-UnifiedQaRoundCard, mesma logica que
+# Get-ExtLinksHtml ja tinha inline (nao mexida ali pra nao arriscar
+# codigo ja validado - so' extraida aqui pros 2 pontos novos que
+# precisavam da mesma coisa duas vezes).
+function Get-PrPillHtml([string]$pr, $docs) {
+    $num = if ($pr -match '(\d+)$') { $Matches[1] } else { '' }
+    $stateClass = ''; $stateTitle = 'Abrir PR no GitHub'
+    if (@($docs | Where-Object { $_.PrMerged -and $_.PrMerged.Contains($pr) }).Count -gt 0) {
+        $stateClass = ' ext-github-merged'; $stateTitle = 'PR mergeado'
+    } elseif (@($docs | Where-Object { $_.PrRejected -and $_.PrRejected.Contains($pr) }).Count -gt 0) {
+        $stateClass = ' ext-github-rejected'; $stateTitle = 'PR fechado sem merge'
+    } elseif (@($docs | Where-Object { $_.PrPending -and $_.PrPending.Contains($pr) }).Count -gt 0) {
+        $stateClass = ' ext-github-open'; $stateTitle = 'PR aberto, aguardando merge'
+    }
+    $kind = Get-PrKindInfo $pr
+    return "<a class=`"ext-link ext-github$stateClass`" href=`"$(Esc $pr)`" target=`"_blank`" title=`"$($kind.Title) - $stateTitle`">$($kind.Icon) PR #$num</a>"
+}
+
+# Uma caixa por modulo (mesmo estilo visual da caixa "Pendencias" do
+# card ativo, `.position` - fundo escuro, borda, cantos arredondados),
+# cada uma com os campos Reportado/Causa raiz/Corrigido daquele modulo
+# (Get-QaFieldsHtml). So' mostra o rotulo do modulo (LayerLabel) quando
+# tem mais de 1 - card solo (1 modulo) fica so' com a caixa, sem titulo
+# (nao tem o que desambiguar).
+function Get-QaFieldBoxesHtml($entries) {
+    $entries = @($entries)
+    $showLabel = $entries.Count -gt 1
+    $boxes = $entries | ForEach-Object {
+        $labelHtml = if ($showLabel) { "<div class=`"qa-field-box-label`">$(Esc $_.LayerLabel)</div>" } else { '' }
+        "<div class=`"qa-field-box`">$labelHtml<p class=`"qa-field-text`">$(Get-QaFieldsHtml $_.Round)</p></div>"
+    }
+    return "<div class=`"qa-field-boxes`">$($boxes -join "`n")</div>"
+}
+
+function Build-QaRoundCard([PSCustomObject]$card, [PSCustomObject]$round) {
+    $repoLayer = Get-RepoLayer $card.Repo
+    $repoLayerLabel = if ($repoLayer) { $script:RepoLayerLabels[$repoLayer] } else { $null }
+    $label = if ($repoLayerLabel) { "Task $($card.Task) $($script:EmDash) $repoLayerLabel $($script:EmDash) QA#$($round.RoundNum)" } else { "Task $($card.Task) $($script:EmDash) QA#$($round.RoundNum)" }
+
+    $resumoBtnHtml = ''
+    if ($card.ResumoDoc) {
+        $summaryFile = Get-SummaryFileName $card
+        $resumoBtnHtml = "<a class=`"icon-btn resumo-btn`" href=`"summaries/$summaryFile`" title=`"Ver resumo`" aria-label=`"Ver resumo`">$bookIcon</a>"
+    }
+
+    # Estado real (mergeado/aberto/rejeitado) do PR costuma estar gravado
+    # so' no frontmatter do `resumo` (pr_merged), nao em task-planning/
+    # testes - sem incluir o ResumoDoc aqui, o pill fica cinza mesmo com
+    # o PR ja mergeado (bug real, 2026-08-25; mesmo padrao ja usado em
+    # Get-ExtLinksHtml pro card normal, que sempre incluiu ResumoDoc).
+    $stateDocs = @($card.Docs) + @(if ($card.ResumoDoc) { $card.ResumoDoc })
+    $extLinks = @($round.PRs | ForEach-Object { Get-PrPillHtml $_ $stateDocs })
+    $extLinksHtml = if ($extLinks.Count -gt 0) { "<div class=`"ext-links`">$($extLinks -join "`n")</div>" } else { '' }
+
+    $qaCmds = @(Get-CardCommands $card | Where-Object { $_.Label -eq 'Reabrir p/ QA' })
+    $btns = ($qaCmds | ForEach-Object { "<a class=`"$($_.Class)`" href=`"$(Esc $_.Uri)`" data-cmd=`"$(Esc $_.Cmd)`">$(Esc $_.Label)</a>" }) -join ''
+    $btnsHtml = "<div class=`"btns`">$btns</div>"
+
+    $updatedHtml = if ($round.DateLabel) { "<span class=`"updated`">Atualizado $(Esc $round.DateLabel)</span>" } else { '' }
+    $repoLower = Esc(($card.Repo).ToLowerInvariant())
+    $searchBlob = Esc(("$label $($card.Repo) $(Get-QaSearchText $round)").ToLowerInvariant())
+    $cardId = Esc("$($round.TestesDoc.Path)#qa$($round.RoundNum)")
+    $fieldBoxesHtml = Get-QaFieldBoxesHtml @([PSCustomObject]@{ LayerLabel = $repoLayerLabel; Round = $round })
+
+    return @"
+<div class="card qa-round-card" data-search="$searchBlob" data-repo="$repoLower" data-id="$cardId">
+  <div class="card-head">
+    <div class="card-head-left">
+      <span class="task-id" title="$(Esc $label)">$(Esc $label)</span>
+    </div>
+    <div class="card-head-right">
+      $resumoBtnHtml
+    </div>
+  </div>
+  <div class="repo-line"><span class="repo" title="$(Esc $card.Repo)">$(Esc $card.Repo)</span></div>
+  $extLinksHtml
+  $fieldBoxesHtml
+  <div class="card-foot">
+    $updatedHtml
+    $btnsHtml
+  </div>
+  <button class="expand-btn" type="button" title="Expandir" aria-label="Expandir">$chevronIcon</button>
+</div>
+"@
+}
+
+# Versao unificada de Build-QaRoundCard - quando a MESMA rodada (rodada N
+# + mesma data no heading) existe em 2 ou 3 camadas da mesma task
+# (backend/frontend/migrations, qualquer combinacao), vira UM card so'
+# em vez de varios (pedido explicito do usuario, 2026-08-25: "unificar
+# quando o qa foi feito junto" - estendido depois pra incluir migrations
+# tambem, "os 3 tipos nao precisam estar separados se foi feitos
+# juntos"). $entries e' um array de objetos { Card; Round; LayerLabel },
+# 2 ou 3 itens, ja ordenados (ver Get-RoundEntrySortKey no ponto de
+# chamada) - PRs e link de resumo somam todas as camadas; o botao de
+# acao mostra um comando por camada (a reativacao ainda e' por repo, nao
+# existe granularidade "todas juntas" no fluxo de git, ver task-hub-qa).
+function Build-UnifiedQaRoundCard($entries) {
+    $firstCard = $entries[0].Card
+    $layerLine = ($entries | ForEach-Object { $_.LayerLabel }) -join ' + '
+    $label = "Task $($firstCard.Task) $($script:EmDash) $layerLine $($script:EmDash) QA#$($entries[0].Round.RoundNum)"
+
+    $resumoBtnHtml = ''
+    if ($firstCard.ResumoDoc) {
+        $summaryFile = Get-SummaryFileName $firstCard
+        $resumoBtnHtml = "<a class=`"icon-btn resumo-btn`" href=`"summaries/$summaryFile`" title=`"Ver resumo`" aria-label=`"Ver resumo`">$bookIcon</a>"
+    }
+
+    # ResumoDoc incluido pelo mesmo motivo de Build-QaRoundCard - estado
+    # real do PR costuma estar so' la, nao em task-planning/testes.
+    $allDocs = @($entries | ForEach-Object { @($_.Card.Docs) + @(if ($_.Card.ResumoDoc) { $_.Card.ResumoDoc }) })
+    $mergedPrs = New-Object System.Collections.Generic.List[string]
+    foreach ($e in $entries) { foreach ($pr in $e.Round.PRs) { if (-not $mergedPrs.Contains($pr)) { $mergedPrs.Add($pr) } } }
+    $extLinks = @($mergedPrs | ForEach-Object { Get-PrPillHtml $_ $allDocs })
+    $extLinksHtml = if ($extLinks.Count -gt 0) { "<div class=`"ext-links`">$($extLinks -join "`n")</div>" } else { '' }
+
+    # Cada camada vira sua propria caixa (Get-QaFieldBoxesHtml, mesmo
+    # estilo da caixa "Pendencias") - $teaserPlain (texto puro, sem HTML)
+    # so' pro indice de busca.
+    $teaserPlain = (@($entries | ForEach-Object { Get-QaSearchText $_.Round }) | Where-Object { $_ }) -join ' | '
+    $fieldBoxesHtml = Get-QaFieldBoxesHtml $entries
+
+    $btns = ''
+    foreach ($e in $entries) {
+        foreach ($c in (Get-CardCommands $e.Card | Where-Object { $_.Label -eq 'Reabrir p/ QA' })) {
+            $btns += "<a class=`"$($c.Class)`" href=`"$(Esc $c.Uri)`" data-cmd=`"$(Esc $c.Cmd)`">Reabrir p/ QA ($($e.LayerLabel.ToLowerInvariant()))</a>"
+        }
+    }
+    $btnsHtml = "<div class=`"btns`">$btns</div>"
+
+    $updatedHtml = if ($entries[0].Round.DateLabel) { "<span class=`"updated`">Atualizado $(Esc $entries[0].Round.DateLabel)</span>" } else { '' }
+    $repoLine = ($entries | ForEach-Object { $_.Card.Repo }) -join ' + '
+    $repoLower = Esc(($repoLine).ToLowerInvariant())
+    $searchBlob = Esc(("$label $repoLine $teaserPlain").ToLowerInvariant())
+    $cardId = Esc((($entries | ForEach-Object { "$($_.Round.TestesDoc.Path)#qa$($_.Round.RoundNum)" }) -join '+'))
+
+    return @"
+<div class="card qa-round-card" data-search="$searchBlob" data-repo="$repoLower" data-id="$cardId">
+  <div class="card-head">
+    <div class="card-head-left">
+      <span class="task-id" title="$(Esc $label)">$(Esc $label)</span>
+    </div>
+    <div class="card-head-right">
+      $resumoBtnHtml
+    </div>
+  </div>
+  <div class="repo-line"><span class="repo" title="$(Esc $repoLine)">$(Esc $repoLine)</span></div>
+  $extLinksHtml
+  $fieldBoxesHtml
+  <div class="card-foot">
+    $updatedHtml
+    $btnsHtml
+  </div>
+  <button class="expand-btn" type="button" title="Expandir" aria-label="Expandir">$chevronIcon</button>
+</div>
+"@
+}
+
 function Build-SummaryHtml([PSCustomObject]$card) {
     $resumoDoc = $card.ResumoDoc
     $sections = Get-ResumoSections $resumoDoc.Body
@@ -581,13 +1078,19 @@ function Build-SummaryHtml([PSCustomObject]$card) {
         $contentHtml = Convert-SectionHtml $sections[$name]
         "<section class=`"resumo-section`"><h2>$(Esc $name)</h2>$contentHtml</section>"
     }) -join "`n"
-
     # pseudo_task aparece entre parenteses no titulo pra dar um numero curto
     # e buscavel a task "general" (senao so acha por nome do cluster, ver
     # 01-regras-biblioteca.md) - mesma ideia de "Task N", mas sem ser uma
     # task numerica de verdade.
-    $taskLabel = if ($card.Cluster) { if ($card.PseudoTask) { "$($card.Cluster) (#$($card.PseudoTask))" } else { $card.Cluster } } elseif ($card.Task -eq 'general') { if ($card.PseudoTask) { "Geral (#$($card.PseudoTask))" } else { 'Geral' } } else { "Task $($card.Task)" }
-    $extLinksHtml = Get-ExtLinksHtml $card
+    # Rotulo curto de camada (Backend/Frontend/Migrations, ver Get-RepoLayer)
+    # no lugar do texto de Function - o titulo precisa dar pra entender o
+    # card sem ler mais nada (mesmo card.Function e' longo demais pra
+    # caber sem cortar/quebrar em varias linhas). $card.Function continua
+    # sendo mostrado por extenso logo abaixo (<p class="func">).
+    $repoLayer = Get-RepoLayer $card.Repo
+    $repoLayerLabel = if ($repoLayer) { $script:RepoLayerLabels[$repoLayer] } else { $null }
+    $taskLabel = if ($card.Cluster) { if ($card.PseudoTask) { "$($card.Cluster) (#$($card.PseudoTask))" } else { $card.Cluster } } elseif ($card.Task -eq 'general') { if ($card.PseudoTask) { "Geral (#$($card.PseudoTask))" } else { 'Geral' } } elseif ($repoLayerLabel) { "Task $($card.Task) $($script:EmDash) $repoLayerLabel" } else { "Task $($card.Task)" }
+    $extLinksHtml = Get-ExtLinksHtml $card -AllSiblings
 
     # Testes - so os CONCLUIDOS, so o link (sem detalhe de resultado aqui,
     # o doc de testes em si ja tem isso - aqui e' so "foi feito, olha o link")
@@ -714,26 +1217,9 @@ $faviconLink
   <div class="col-side">$sideHtml</div>
 </div>
 <script>
+$launchButtonJs
 document.querySelectorAll('.copy-btn[data-cmd]').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var text = btn.getAttribute('data-cmd');
-    function fallback() {
-      var ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e) {}
-      document.body.removeChild(ta);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(fallback);
-    } else {
-      fallback();
-    }
-    var original = btn.textContent;
-    btn.textContent = 'Abrindo...';
-    setTimeout(function () { btn.textContent = original; }, 1500);
-  });
+  btn.addEventListener('click', function () { biblLaunch(btn, btn.getAttribute('data-cmd')); });
 });
 </script>
 </body>
@@ -768,7 +1254,7 @@ function Build-Card([PSCustomObject]$card) {
 
     $resumoBtnHtml = ''
     if ($card.ResumoDoc) {
-        $summaryFile = [IO.Path]::GetFileNameWithoutExtension($card.ResumoDoc.Path) + '.html'
+        $summaryFile = Get-SummaryFileName $card
         $resumoBtnHtml = "<a class=`"icon-btn resumo-btn`" href=`"summaries/$summaryFile`" title=`"Ver resumo`" aria-label=`"Ver resumo`">$bookIcon</a>"
     }
 
@@ -779,7 +1265,14 @@ function Build-Card([PSCustomObject]$card) {
     # e buscavel a task "general" (senao so acha por nome do cluster, ver
     # 01-regras-biblioteca.md) - mesma ideia de "Task N", mas sem ser uma
     # task numerica de verdade.
-    $taskLabel = if ($card.Cluster) { if ($card.PseudoTask) { "$($card.Cluster) (#$($card.PseudoTask))" } else { $card.Cluster } } elseif ($card.Task -eq 'general') { if ($card.PseudoTask) { "Geral (#$($card.PseudoTask))" } else { 'Geral' } } else { "Task $($card.Task)" }
+    # Rotulo curto de camada (Backend/Frontend/Migrations, ver Get-RepoLayer)
+    # no lugar do texto de Function - o titulo precisa dar pra entender o
+    # card sem ler mais nada (mesmo card.Function e' longo demais pra
+    # caber sem cortar/quebrar em varias linhas). $card.Function continua
+    # sendo mostrado por extenso logo abaixo (<p class="func">).
+    $repoLayer = Get-RepoLayer $card.Repo
+    $repoLayerLabel = if ($repoLayer) { $script:RepoLayerLabels[$repoLayer] } else { $null }
+    $taskLabel = if ($card.Cluster) { if ($card.PseudoTask) { "$($card.Cluster) (#$($card.PseudoTask))" } else { $card.Cluster } } elseif ($card.Task -eq 'general') { if ($card.PseudoTask) { "Geral (#$($card.PseudoTask))" } else { 'Geral' } } elseif ($repoLayerLabel) { "Task $($card.Task) $($script:EmDash) $repoLayerLabel" } else { "Task $($card.Task)" }
     $searchBlob = Esc(("$taskLabel $($card.Repo) $($card.Function)").ToLowerInvariant())
     $repoLower = Esc(($card.Repo).ToLowerInvariant())
     $cardId = Esc($card.RepPath)
@@ -791,11 +1284,11 @@ function Build-Card([PSCustomObject]$card) {
       <span class="task-id" title="$(Esc $taskLabel)">$(Esc $taskLabel)</span>
     </div>
     <div class="card-head-right">
-      <span class="repo" title="$(Esc $card.Repo)">$(Esc $card.Repo)</span>
       $resumoBtnHtml
       $starHtml
     </div>
   </div>
+  <div class="repo-line"><span class="repo" title="$(Esc $card.Repo)">$(Esc $card.Repo)</span></div>
   $extLinksHtml
   <p class="func">$(Esc $card.Function)</p>
   <div class="chips">
@@ -1205,7 +1698,7 @@ $faviconLink
   <div class="nt-col-main">
     <section class="nt-section nt-azure">
       <h2>$linkIcon Origem (Azure DevOps)</h2>
-      <label class="req" for="nt-azure">Link do work item</label>
+      <label class="nt-optional" for="nt-azure">Link do work item (opcional)</label>
       <input type="text" id="nt-azure" placeholder="https://dev.azure.com/.../_workitems/edit/12345" autocomplete="off">
       <label class="nt-optional" for="nt-parent">Link do item pai (opcional)</label>
       <input type="text" id="nt-parent" placeholder="https://dev.azure.com/.../_workitems/edit/12000" autocomplete="off">
@@ -1214,7 +1707,7 @@ $faviconLink
 
     <section class="nt-section">
       <h2>Repositorio</h2>
-      <label class="req" for="nt-repo">Repositorio</label>
+      <label class="nt-optional" for="nt-repo">Repositorio (opcional)</label>
       <input type="text" id="nt-repo" list="nt-repos" placeholder="meu-app-frontend" autocomplete="off">
       <datalist id="nt-repos">
 $knownReposOptionsHtml
@@ -1248,6 +1741,7 @@ $knownReposOptionsHtml
 </div>
 
 <script>
+$launchButtonJs
 var azureEl = document.getElementById('nt-azure');
 var parentEl = document.getElementById('nt-parent');
 var repoEl = document.getElementById('nt-repo');
@@ -1283,9 +1777,18 @@ function buildPromptText() {
   return parts.join('\n\n');
 }
 
+// "Biblioteca" nao mora em reposBasePath (e' a raiz do proprio repo da
+// Biblioteca) - mesmo caso especial do seletor "Abrir Claude" do header
+// (ver __LIB_ROOT_PATH__ no $foot). Repo em branco cai solto na pasta que
+// contem todos os repos, igual o header - nao bloqueia mais o lancamento.
+function getTargetPath(repo) {
+  if (repo.toLowerCase() === 'biblioteca') { return '$hubRootJs'; }
+  return repo ? ('$reposBasePathJs\\' + repo) : '$reposBasePathJs';
+}
+
 function updatePathHint() {
   var repo = repoEl.value.trim();
-  pathHint.textContent = repo ? ('Vai abrir em: ' + '$reposBasePathJs\\' + repo) : '';
+  pathHint.textContent = 'Vai abrir em: ' + getTargetPath(repo);
 }
 
 function regeneratePrompt() {
@@ -1315,35 +1818,20 @@ document.getElementById('nt-recalc').addEventListener('click', function (e) {
 });
 
 launch.addEventListener('click', function (e) {
-  var azure = azureEl.value.trim();
   var repo = repoEl.value.trim();
   var desc = descEl.value.trim();
-  if (!azure || !repo || !desc) {
+  if (!desc) {
     e.preventDefault();
-    warn.textContent = 'Preencha ao menos o link do Azure, o repositorio e a descricao.';
+    warn.textContent = 'Preencha ao menos a descricao.';
     return;
   }
   warn.textContent = '';
   var promptOneLine = promptEl.value.trim().replace(/\r\n|\r|\n/g, '\\n').replace(/"/g, "'");
   var escapedPhrase = promptOneLine.replace(/'/g, "''");
-  var cmd = 'powershell -NoProfile -Command "cd \'$reposBasePathJs\\' + repo + '\'; claude \'' + escapedPhrase + '\'"';
+  var cmd = 'powershell -NoProfile -Command "cd \'' + getTargetPath(repo) + '\'; claude \'' + escapedPhrase + '\'"';
 
   rawOutput.value = cmd;
-  launch.setAttribute('href', 'biblioteca-cmd-run:' + encodeURIComponent(cmd));
-
-  function fallback() {
-    var ta = document.createElement('textarea');
-    ta.value = cmd;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); } catch (err) {}
-    document.body.removeChild(ta);
-  }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(cmd).catch(fallback);
-  } else {
-    fallback();
-  }
+  biblLaunch(launch, cmd);
 });
 </script>
 </body>
@@ -1516,8 +2004,80 @@ $activeCards = @($cards | Where-Object { $_.Active } | Sort-Object Updated -Desc
 $doneCards = @($cards | Where-Object { -not $_.Active } | Sort-Object Updated -Descending)
 $pendenciasCount = @($cards | Where-Object { $_.ResumoDoc -and $_.ResumoDoc.Status -in @('draft', 'in_progress') -and -not $_.Active }).Count
 
-$activeHtml = ($activeCards | ForEach-Object { Build-Card $_ }) -join "`n"
-$doneHtml = ($doneCards | ForEach-Object { Build-Card $_ }) -join "`n"
+# Pre-computa, por task numerica, quais rodadas de QA viram card unico
+# (rodada N + mesma data no heading) entre QUALQUER combinacao das 3
+# camadas (backend/frontend/migrations - 2 ou 3 juntas, nao so' o par
+# backend+frontend) e quais ficam solo (so' 1 camada tocou aquela
+# rodada). Guarda o resultado por RepPath do card "dono" do bloco (pra
+# uniao, sempre a camada que vem primeiro na ordem fixa abaixo) - o loop
+# de render mais adiante so' consulta esse mapa, nao recalcula nada.
+# Processar por task (nao por card) e' o que evita duplicar: sem isso,
+# cada camada tentaria renderizar a MESMA rodada unificada por conta
+# propria.
+$layerOrder = @{ backend = 0; frontend = 1; migrations = 2 }
+$roundBlocksByRepPath = @{}
+$processedQaTasks = New-Object System.Collections.Generic.HashSet[string]
+foreach ($c in $cards) {
+    if ($c.Task -notmatch '^\d+$') { continue }
+    if (-not $processedQaTasks.Add($c.Task)) { continue }
+
+    $siblings = Get-TaskSiblings $c
+    $layerCards = @{}
+    foreach ($layer in $layerOrder.Keys) {
+        $found = @($siblings | Where-Object { (Get-RepoLayer $_.Repo) -eq $layer } | Select-Object -First 1)
+        if ($found.Count -gt 0) { $layerCards[$layer] = $found[0] }
+    }
+    if ($layerCards.Count -eq 0) { continue }
+
+    # Agrupa toda rodada de toda camada presente por "numero|data" - cada
+    # grupo com 2+ camadas vira 1 card unificado, grupo com 1 so' fica
+    # como card solo (Build-QaRoundCard, comportamento de sempre).
+    $roundGroups = @{}
+    foreach ($layer in $layerCards.Keys) {
+        $layerCard = $layerCards[$layer]
+        $layerLabel = $script:RepoLayerLabels[$layer]
+        foreach ($r in (Get-QaRounds $layerCard)) {
+            $key = "$($r.RoundNum)|$($r.DateLabel)"
+            if (-not $roundGroups.ContainsKey($key)) { $roundGroups[$key] = New-Object System.Collections.Generic.List[object] }
+            $roundGroups[$key].Add([PSCustomObject]@{ Card = $layerCard; Round = $r; LayerLabel = $layerLabel; LayerOrder = $layerOrder[$layer] })
+        }
+    }
+
+    foreach ($key in $roundGroups.Keys) {
+        $entries = @($roundGroups[$key] | Sort-Object LayerOrder)
+        $ownerRepPath = $entries[0].Card.RepPath
+        if (-not $roundBlocksByRepPath.ContainsKey($ownerRepPath)) { $roundBlocksByRepPath[$ownerRepPath] = New-Object System.Collections.Generic.List[string] }
+        if ($entries.Count -ge 2) {
+            $roundBlocksByRepPath[$ownerRepPath].Add((Build-UnifiedQaRoundCard $entries))
+        } else {
+            $roundBlocksByRepPath[$ownerRepPath].Add((Build-QaRoundCard $entries[0].Card $entries[0].Round))
+        }
+    }
+}
+# Cards `general`/cluster (sem task numerica) nunca entram na uniao -
+# sempre solo, mesmo fluxo de sempre.
+foreach ($c in $cards) {
+    if ($c.Task -match '^\d+$') { continue }
+    foreach ($r in (Get-QaRounds $c)) {
+        if (-not $roundBlocksByRepPath.ContainsKey($c.RepPath)) { $roundBlocksByRepPath[$c.RepPath] = New-Object System.Collections.Generic.List[string] }
+        $roundBlocksByRepPath[$c.RepPath].Add((Build-QaRoundCard $c $r))
+    }
+}
+
+# Cada card de repo e' seguido, na mesma secao (Ativas/Completas), pelos
+# blocos de rodada de QA pre-computados acima - ficam adjacentes ao card
+# "pai" no HTML final, mas NAO entram no array $cards (evita afetar
+# contagem/sweep/favorito, pensados pra card de repo).
+function Build-CardWithQaRounds([PSCustomObject]$card) {
+    $blocks = New-Object System.Collections.Generic.List[string]
+    $blocks.Add((Build-Card $card))
+    if ($roundBlocksByRepPath.ContainsKey($card.RepPath)) {
+        foreach ($b in $roundBlocksByRepPath[$card.RepPath]) { $blocks.Add($b) }
+    }
+    return $blocks -join "`n"
+}
+$activeHtml = ($activeCards | ForEach-Object { Build-CardWithQaRounds $_ }) -join "`n"
+$doneHtml = ($doneCards | ForEach-Object { Build-CardWithQaRounds $_ }) -join "`n"
 if (-not $activeHtml) { $activeHtml = '<p class="empty">Nenhuma task ativa.</p>' }
 if (-not $doneHtml) { $doneHtml = '<p class="empty">Nenhuma task completa.</p>' }
 
@@ -1700,6 +2260,23 @@ $faviconLink
   .card-current {
     border-color: var(--current); box-shadow: 0 0 0 1px var(--current), 0 0 16px -2px var(--current-glow);
   }
+  .qa-round-card { border-left: 3px solid #3d5c44; }
+  /* Uma caixa por modulo dentro do card de rodada de QA - mesmo visual
+     da caixa "Pendencias" (.position: fundo escuro, borda, cantos
+     arredondados), so' que uma por modulo em vez de uma lista de
+     camadas. Rotulo (.qa-field-box-label) so' aparece quando 2+ caixas
+     (Get-QaFieldBoxesHtml decide isso, nao o CSS). */
+  .qa-field-boxes { flex-direction: column; gap: 8px; }
+  .qa-field-box {
+    background: #202225; border: 1px solid #303338; border-radius: 8px; padding: 8px 10px;
+  }
+  .qa-field-box-label {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--gold-bright); font-weight: 600; margin: 0 0 4px;
+  }
+  .qa-field-text { font-size: 0.85rem; color: #c2c4c9; line-height: 1.42; margin: 0; }
+  .qa-field-text strong { color: var(--gold-bright); font-weight: 600; }
+  .qa-round-card .task-id { white-space: normal; overflow: visible; text-overflow: clip; }
   .badge-current {
     align-self: flex-start; background: var(--current); color: #2b1d0a; font-weight: 700;
     font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase;
@@ -1714,8 +2291,9 @@ $faviconLink
   }
   .repo {
     font-family: ui-monospace, "SF Mono", monospace; font-size: 0.8rem; color: var(--gold-bright);
-    display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .repo-line { margin: 2px 0 8px; }
   .func {
     font-size: 0.88rem; color: #c2c4c9; margin: 0; line-height: 1.35;
     display: -webkit-box; -webkit-line-clamp: 1; line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
@@ -1750,10 +2328,11 @@ $faviconLink
   }
   .expand-btn:hover { color: var(--gold-bright); border-color: var(--gold-border); }
   .card.expanded .expand-btn { transform: rotate(180deg); }
-  .chips, .position, .btns { display: none; }
+  .chips, .position, .btns, .qa-field-boxes { display: none; }
   .card.expanded .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .card.expanded .position { display: flex; }
   .card.expanded .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .card.expanded .qa-field-boxes { display: flex; }
   /* Hora do "Atualizado": sempre visivel em Ativas, so' ao expandir em
      Completas - card fechado mostra so a data, sem poluir a grade. */
   .updated-time { display: none; }
@@ -1823,38 +2402,20 @@ $head = $head.Replace('$faviconLink', $faviconLink)
 
 $foot = @'
 <script>
+__LAUNCH_BUTTON_JS__
 document.querySelectorAll('.copy-btn[data-cmd]').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var text = btn.getAttribute('data-cmd');
-    function fallback() {
-      var ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e) {}
-      document.body.removeChild(ta);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(fallback);
-    } else {
-      fallback();
-    }
-    var original = btn.textContent;
-    btn.textContent = 'Abrindo...';
-    setTimeout(function () { btn.textContent = original; }, 1500);
-  });
+  btn.addEventListener('click', function () { biblLaunch(btn, btn.getAttribute('data-cmd')); });
 });
 
 // Acesso rapido "Abrir Claude no repo" - o comando depende do repo escolhido
 // no navegador, entao e' montado aqui no clique (nao em build-time como os
-// outros botoes) - mesmo mecanismo biblioteca-cmd:/clipboard, so' calculado
-// tarde. __REPOS_BASE_PATH__ e' substituido por texto literal depois (mesma
-// tecnica do $faviconLink no $head - $foot e' single-quoted, sem interpolar).
+// outros botoes) - mesmo biblLaunch dos outros, so' calculado tarde.
+// __REPOS_BASE_PATH__/__LIB_ROOT_PATH__ sao substituidos por texto literal
+// depois (mesma tecnica do $faviconLink no $head - $foot e' single-quoted,
+// sem interpolar).
 var quickBtn = document.getElementById('quick-open-btn');
 if (quickBtn) {
-  var quickBtnOriginal = quickBtn.textContent;
-  quickBtn.addEventListener('click', function (e) {
-    e.preventDefault();
+  quickBtn.addEventListener('click', function () {
     var repo = document.getElementById('quick-repo').value.trim();
     // Sem repo escolhido -> abre solto na pasta que contem todos os repos
     // (reposBasePath), em vez de nao fazer nada.
@@ -1865,28 +2426,7 @@ if (quickBtn) {
     var cmd = 'powershell -NoProfile -Command "cd \'' + targetPath + '\'; claude"';
     // -run: aperta Enter sozinho - so abre uma janela solta do Claude, sem
     // disparar nenhuma skill nem gravar nada, diferente dos outros botoes.
-    var launchUrl = 'biblioteca-cmd-run:' + encodeURIComponent(cmd);
-    // Navegacao explicita (window.location.href), nunca o href/default-action
-    // do <a> - com preventDefault ativo o navegador nao segue o link sozinho
-    // mais (era isso que causava o scroll da pagina inteira no clique, sem
-    // garantia de ordem com a copia pro clipboard).
-    function goLaunch() { window.location.href = launchUrl; }
-    function fallback() {
-      var ta = document.createElement('textarea');
-      ta.value = cmd;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (err) {}
-      document.body.removeChild(ta);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(cmd).then(goLaunch).catch(function () { fallback(); goLaunch(); });
-    } else {
-      fallback();
-      goLaunch();
-    }
-    quickBtn.textContent = 'Abrindo...';
-    setTimeout(function () { quickBtn.textContent = quickBtnOriginal; }, 1500);
+    biblLaunch(quickBtn, cmd);
   });
 }
 
@@ -2085,7 +2625,7 @@ setInterval(function () { saveReloadState(); location.reload(); }, LIVE_RELOAD_M
 $quickOpenHtml = ''
 $reposBasePathJs = if ($bibConfig.reposBasePath) { $bibConfig.reposBasePath.Replace('\', '\\') } else { '' }
 $libRootJs = $root.Replace('\', '\\')
-$foot = $foot.Replace('__REPOS_BASE_PATH__', $reposBasePathJs).Replace('__LIB_ROOT_PATH__', $libRootJs)
+$foot = $foot.Replace('__REPOS_BASE_PATH__', $reposBasePathJs).Replace('__LIB_ROOT_PATH__', $libRootJs).Replace('__LAUNCH_BUTTON_JS__', $launchButtonJs)
 if ($bibConfig.reposBasePath) {
     $quickOpenHtml = @"
 <div class="quick-open">
@@ -2197,9 +2737,9 @@ New-Item -ItemType Directory -Force -Path $summariesDir | Out-Null
 $summaryCount = 0
 foreach ($card in $cards) {
     if (-not $card.ResumoDoc) { continue }
-    $baseName = [IO.Path]::GetFileNameWithoutExtension($card.ResumoDoc.Path)
+    $summaryFile = Get-SummaryFileName $card
     $summaryHtml = Build-SummaryHtml $card
-    [System.IO.File]::WriteAllText((Join-Path $summariesDir "$baseName.html"), $summaryHtml)
+    [System.IO.File]::WriteAllText((Join-Path $summariesDir $summaryFile), $summaryHtml)
     $summaryCount++
 }
 

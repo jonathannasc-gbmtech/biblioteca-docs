@@ -110,7 +110,7 @@
   <div class="nt-col-main">
     <section class="nt-section nt-azure">
       <h2><svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M4.72 3.5a2.25 2.25 0 000 4.5h1.5a.75.75 0 010 1.5h-1.5a3.75 3.75 0 010-7.5h1.5a.75.75 0 010 1.5h-1.5zm6.56 0h-1.5a.75.75 0 000 1.5h1.5a2.25 2.25 0 010 4.5h-1.5a.75.75 0 000 1.5h1.5a3.75 3.75 0 000-7.5zM5.5 8a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5h-3.5A.75.75 0 015.5 8z"/></svg> Origem (Azure DevOps)</h2>
-      <label class="req" for="nt-azure">Link do work item</label>
+      <label class="nt-optional" for="nt-azure">Link do work item (opcional)</label>
       <input type="text" id="nt-azure" placeholder="https://dev.azure.com/.../_workitems/edit/12345" autocomplete="off">
       <label class="nt-optional" for="nt-parent">Link do item pai (opcional)</label>
       <input type="text" id="nt-parent" placeholder="https://dev.azure.com/.../_workitems/edit/12000" autocomplete="off">
@@ -184,6 +184,32 @@ var rawOutput = document.getElementById('nt-output');
 var launch = document.getElementById('nt-launch');
 var reposBase = 'C:\\Users\\Jonathan Nascimento\\Documents\\Repo';
 
+// Padrao unico de lancamento (biblioteca-cmd-run:) - mesmo usado por todo
+// outro botao do dashboard/resumo (fonte: build-dashboard.ps1). href
+// sempre atualizado ANTES do clique nativo seguir - nunca preventDefault +
+// location.href de novo pra reabrir um protocolo customizado (dispara o
+// handler do SO 2x em alguns navegadores, era o que este botao fazia).
+// Clipboard e' so fallback assincrono, nao bloqueia a navegacao.
+function biblLaunch(el, cmd) {
+  el.setAttribute('href', 'biblioteca-cmd-run:' + encodeURIComponent(cmd));
+  function fallback() {
+    var ta = document.createElement('textarea');
+    ta.value = cmd;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).catch(fallback);
+  } else {
+    fallback();
+  }
+  var original = el.textContent;
+  el.textContent = 'Abrindo...';
+  setTimeout(function () { el.textContent = original; }, 1500);
+}
+
 // Sem skill dedicada - o prompt e' auto-suficiente: abre direto no repo e
 // usa o fluxo global de skills (gbm-triagem/criar-task-code/plano-acao)
 // que ja dispara sozinho por causa do CLAUDE.md do usuario. As instrucoes
@@ -232,12 +258,11 @@ function regeneratePrompt() {
 });
 
 launch.addEventListener('click', function (e) {
-  e.preventDefault();
-  var azure = azureEl.value.trim();
   var repo = repoEl.value.trim();
   var desc = descEl.value.trim();
-  if (!azure || !desc) {
-    warn.textContent = 'Preencha ao menos o link do Azure e a descricao.';
+  if (!desc) {
+    e.preventDefault();
+    warn.textContent = 'Preencha ao menos a descricao.';
     return;
   }
   warn.textContent = '';
@@ -247,23 +272,7 @@ launch.addEventListener('click', function (e) {
   var cmd = 'powershell -NoProfile -Command "cd \'' + targetDir + '\'; claude \'' + escapedPhrase + '\'"';
 
   rawOutput.value = cmd;
-  var launchUrl = 'biblioteca-cmd-run:' + encodeURIComponent(cmd);
-
-  function fallback() {
-    var ta = document.createElement('textarea');
-    ta.value = cmd;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); } catch (err) {}
-    document.body.removeChild(ta);
-  }
-  function goLaunch() { window.location.href = launchUrl; }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(cmd).then(goLaunch).catch(function () { fallback(); goLaunch(); });
-  } else {
-    fallback();
-    goLaunch();
-  }
+  biblLaunch(launch, cmd);
 });
 </script>
 </body>
