@@ -13,6 +13,14 @@ param(
     [int]$Limit = 500
 )
 
+# Sem isso, titulo de PR com acento/reticencia unicode (gh devolve UTF-8)
+# chega corrompido no ConvertFrom-Json - console assume o codepage padrao
+# do Windows (nao UTF-8) pra decodificar o stdout do `gh`. Mesmo padrao
+# ja usado em build-dashboard.ps1. Bug real, 2026-09-01: "marítimo" virou
+# "mar├¡timo", reticencia unicode (…) virou "ÔÇª" em 2 titulos de PR
+# diferentes - so' apareceu porque alguns titulos tinham char nao-ASCII.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $libScript = Join-Path $PSScriptRoot 'lib-doc.ps1'
 . $libScript
 
@@ -150,7 +158,38 @@ function Test-ResumoExistsCluster([string]$cluster, [string]$repo) {
     return $false
 }
 
+# Trava real contra duplicata - Test-ResumoExists(Cluster) so' casa por
+# task/cluster+repo, mas a MAIORIA das PRs desta Biblioteca ja tem task
+# numerica de verdade documentada manualmente (task-code/planning/testes/
+# resumo/handover) sob um titulo/numero DIFERENTE do scope literal do
+# commit (ex.: PR com commit "fix(gbma-107064): ..." ja documentada sob a
+# task 107064 "de verdade", nao sob o cluster "gbma-107064" cru) - o
+# classificador por scope/titulo nunca reconhece isso como "ja existe"
+# porque a chave de agrupamento e' outra. Bug real, 2026-09-01: rodada
+# sem essa trava criou 47 "resumo" novos, 44 dos quais eram PRs que ja
+# estavam documentadas em algum lugar da Biblioteca - so 3 eram gap de
+# verdade. Fonte de verdade real e' a URL do PR, nao o texto do titulo/
+# scope - varre TODO arquivo .md da Biblioteca (nao so' resumo/, PR
+# tambem aparece em handover-tecnico/task-planning) 1x no início, monta
+# um set de URLs ja conhecidas, e qualquer grupo com pelo menos 1 PR
+# nesse set e' tratado como ja coberto (pula o grupo inteiro, nao cria
+# entrada parcial).
+function Get-ExistingPrUrls([string]$root) {
+    $urls = New-Object System.Collections.Generic.HashSet[string]
+    $files = Get-ChildItem -Path $root -Recurse -Filter '*.md' -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\_ferramenta\\' }
+    foreach ($f in $files) {
+        $raw = [IO.File]::ReadAllText($f.FullName)
+        foreach ($m in [regex]::Matches($raw, 'https?://github\.com/\S*?/pull/\d+')) {
+            [void]$urls.Add($m.Value)
+        }
+    }
+    return $urls
+}
+
 $allDocs = Get-DocumentFiles $root
+$existingPrUrls = Get-ExistingPrUrls $root
+Write-Host "backfill-github-prs: $($existingPrUrls.Count) URL(s) de PR ja referenciadas na Biblioteca (qualquer doc)."
 $script:nextNumber = Get-NextNumber $allDocs
 $created = 0
 $skipped = 0
@@ -159,6 +198,9 @@ $today = Get-Date -Format 'yyyy-MM-dd'
 # Escreve um resumo pra um grupo (task numerica OU cluster general) -
 # compartilhada pelas 3 trilhas, pra nao triplicar frontmatter/corpo/escrita.
 function Write-BackfillResumo([PSCustomObject]$group) {
+    $anyPrKnown = @($group.Prs | Where-Object { $existingPrUrls.Contains($_.Url) }).Count -gt 0
+    if ($anyPrKnown) { return $false }
+
     $alreadyExists = if ($group.Cluster) { Test-ResumoExistsCluster $group.Cluster $group.Repo } else { Test-ResumoExists $group.Task $group.Repo }
     if ($alreadyExists) { return $false }
 
