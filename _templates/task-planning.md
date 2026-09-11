@@ -5,6 +5,7 @@ status: draft
 repo: nome-do-seu-repo
 task: TASK_ID
 function: Plano de execucao — resumo
+titulo_busca: Migracao dashboard classificacao rodoviario  # obrigatorio - palavras-chave da tarefa, curto (bater o olho e entender)
 stub: —
 plan_active: plano-1
 related:

@@ -7,6 +7,38 @@ de projeto manualmente. O `dashboard.html` gerado aqui costuma ser salvo direto
 nos favoritos do navegador — abrir por lá, sem precisar passar por
 `claude` toda vez só pra ver o estado das tasks.
 
+## Arquitetura interna — onde editar (leia antes de mexer no HTML/CSS)
+
+`build-dashboard.ps1` gera 7 páginas HTML (`dashboard.html`, `summaries/*.html`,
+`paleta.html`, `archive.html`, `nova-task.html`, `pendencias.html` + o
+redirect legado) — cada função `Build-*Html` monta uma delas. Isso já causou
+2 bugs reais de duplicação (2026-09-10-11: `titulo_busca` sumiu do card de QA
+porque cada tipo de card tinha seu próprio HTML escrito na mão; o CSS de cor
+existia em 7 cópias). Pra não repetir isso:
+
+- **Card (cabeçalho/subtítulos/rodapé)**: NUNCA escrever esse HTML na mão
+  dentro de `Build-Card`/`Build-QaRoundCard`/`Build-UnifiedQaRoundCard`.
+  Essas 3 funções chamam `Get-CardHeadHtml`/`Get-CardSubtitlesHtml`/
+  `Get-CardFootHtml`, definidas em `dashboard-lib.ps1` — qualquer ajuste
+  visual de cabeçalho/subtítulo/rodapé entra lá, uma vez só, reflete nos 3
+  tipos de card automaticamente. Se um dia aparecer um 4º tipo de card, ele
+  também chama essas 3 funções — não escreve HTML novo.
+- **CSS de cor/reset comum às 7 páginas**: mora na variável `$sharedCss`
+  (topo do `build-dashboard.ps1`, perto do `$launchButtonJs`, mesmo padrão).
+  Editar SÓ ali — nunca colar a mesma regra dentro do `<style>` de uma
+  função de página específica. Cada página pode somar um `:root {}` extra
+  próprio logo depois, só com as variáveis que só ela usa.
+  **Cuidado**: `$head`/`$foot` (as duas partes do `dashboard.html`) são
+  heredoc single-quoted (`@'...'@`, não interpolam) — a substituição de
+  `$sharedCss`/`$faviconLink` ali é feita por `.Replace()` de texto
+  literal, cego a contexto. Nunca escrever a string literal `$sharedCss`
+  nem `$faviconLink` dentro de um comentário nessas duas heredocs
+  (aconteceu, duplicou o bloco de CSS dentro de um comentário) — descrever
+  por extenso em vez disso.
+- CSS/JS que só uma página usa (ex.: formulário de `nova-task.html`, tabela
+  de `pendencias.html`) fica dentro da função daquela página mesmo — não
+  precisa sair de lá.
+
 ## Estrutura
 
 - **Agrupamento e título do card para `task: general`**: por padrão agrupa

@@ -65,6 +65,23 @@ function biblLaunch(el, cmd) {
 }
 '@
 
+# Tokens de cor + reset base - identicos nas 6 paginas geradas (dashboard,
+# resumo, paleta, archive, nova-task, pendencias). Cada pagina pode somar
+# um `:root { --token-extra: ...; }` proprio logo depois deste bloco pra
+# variaveis que so ela usa (ex.: nova-task.html tem --azure-*/--claude-*,
+# paleta.html tem --current/--current-glow) - nao precisa duplicar as
+# 10 variaveis base, so' extender.
+$sharedCss = @'
+:root {
+  color-scheme: dark;
+  --bg: #1c1e21; --card-bg: #24262a; --card-border: #34373c;
+  --text: #e2e4e7; --text-dim: #93969e; --text-faint: #6d7078;
+  --gold: #b8935a; --gold-bright: #d9b26a; --gold-bg: #2e2717; --gold-border: #6b5628;
+}
+* { box-sizing: border-box; }
+*:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+'@
+
 # Favicon - livro verde vibrante, mesmo desenho do $bookIcon (silhueta) mas
 # preenchido (stroke fino some em 16x16) - vai pra aba do navegador/favoritos.
 $faviconSvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%2322c55e' d='M2 4.8c1.6-.9 3.6-1.3 5.5-1.3 1.7 0 3.4.4 4.5 1v14c-1.1-.6-2.8-1-4.5-1-1.9 0-3.9.4-5.5 1.3V4.8z'/><path fill='%2316a34a' d='M22 4.8c-1.6-.9-3.6-1.3-5.5-1.3-1.7 0-3.4.4-4.5 1v14c1.1-.6 2.8-1 4.5-1 1.9 0 3.9.4 5.5 1.3V4.8z'/></svg>"
@@ -133,9 +150,14 @@ $script:RepoLayerLabels = @{ backend = 'Backend'; frontend = 'Frontend'; migrati
 # Build-QaRoundCard, Build-UnifiedQaRoundCard).
 function Get-SummaryFileName([PSCustomObject]$card) {
     if (-not $card.ResumoDoc) { return $null }
+    # Ate' 2026-09-10 o nome do .md em `resumo/` nao diferenciava camada
+    # (vivia em subpasta `frontend`/`backend`) - por isso o -$layer era
+    # somado aqui pra nao colidir 2 resumos com o mesmo nome-base gerando
+    # o mesmo .html. Depois da unificacao de pastas, o proprio nome do
+    # arquivo ja e' unico (colisao real ganhou sufixo -backend/-frontend
+    # na origem) - somar de novo aqui duplicava o sufixo
+    # ("...-backend-backend.html", achado ao commitar em 2026-09-11).
     $baseName = [IO.Path]::GetFileNameWithoutExtension($card.ResumoDoc.Path)
-    $layer = Get-RepoLayer $card.Repo
-    if ($layer) { return "$baseName-$layer.html" }
     return "$baseName.html"
 }
 
@@ -351,6 +373,7 @@ foreach ($d in $parsedDocs) {
         Task     = $task
         Repo     = Clean-Field $p.Meta['repo']
         Function = Clean-Field $p.Meta['function']
+        TituloBusca = Clean-Field $p.Meta['titulo_busca']
         Type     = Clean-Field $p.Meta['type']
         Status   = $status
         Updated  = Clean-Field $p.Meta['updated']
@@ -611,10 +634,15 @@ foreach ($g in $groups) {
     # pseudo_task e' opcional mesmo em cluster "general" - so os que quiserem
     # um numero curto pra achar por busca (ver 01-regras-biblioteca.md).
     $cardPseudoTask = ($docs + $resumoDoc | Where-Object { $_ -and $_.PseudoTask } | Select-Object -First 1).PseudoTask
+    # titulo_busca e' opcional (campo novo, docs antigos nao tem) - pega o
+    # primeiro preenchido no grupo, mesma logica de cluster/pseudo_task acima.
+    # Sem valor, o card cai pro fallback de Function (ver Build-Card).
+    $cardTituloBusca = ($docs + $resumoDoc | Where-Object { $_ -and $_.TituloBusca } | Select-Object -First 1).TituloBusca
     $cards += [PSCustomObject]@{
         Task      = $rep.Task
         Repo      = $rep.Repo
         Function  = $rep.Function
+        TituloBusca = $cardTituloBusca
         Cluster   = $cardCluster
         PseudoTask = $cardPseudoTask
         Active    = $isActive
@@ -791,11 +819,10 @@ function Get-QaFieldValue([string]$sectionBody, [string]$label) {
 
 # HTML de exibicao de UMA rodada de QA - cada campo (Reportado/Causa
 # raiz/Corrigido) em linha propria com label em negrito, junto via <br>
-# dentro do MESMO <p> (nao 3 <p> separados) - assim o clamp/expand por
-# linha do CSS (.func, .card.expanded .func) continua funcionando sem
-# precisar reimplementar o mecanismo pra um container com filhos. Cai
-# pro teaser bruto (1o paragrafo, ja sem markdown) quando a rodada nao
-# tem os campos padronizados ainda.
+# dentro do MESMO <p> (nao 3 <p> separados) - um bloco visual so, sem
+# espacamento extra de paragrafo entre os campos. Cai pro teaser bruto
+# (1o paragrafo, ja sem markdown) quando a rodada nao tem os campos
+# padronizados ainda.
 function Get-QaFieldsHtml([PSCustomObject]$round) {
     if ($round.Reportado) {
         $lines = New-Object System.Collections.Generic.List[string]
@@ -965,28 +992,26 @@ function Build-QaRoundCard([PSCustomObject]$card, [PSCustomObject]$round) {
 
     $updatedHtml = if ($round.DateLabel) { "<span class=`"updated`">Atualizado $(Esc $round.DateLabel)</span>" } else { '' }
     $repoLower = Esc(($card.Repo).ToLowerInvariant())
-    $searchBlob = Esc(("$label $($card.Repo) $(Get-QaSearchText $round)").ToLowerInvariant())
+    $searchBlob = Esc(("$label $($card.Repo) $($card.TituloBusca) $(Get-QaSearchText $round)").ToLowerInvariant())
     $cardId = Esc("$($round.TestesDoc.Path)#qa$($round.RoundNum)")
     $fieldBoxesHtml = Get-QaFieldBoxesHtml @([PSCustomObject]@{ LayerLabel = $repoLayerLabel; Round = $round })
+    # Mesmo tratamento do card normal: titulo_busca (quando existe) vira o
+    # titulo do card, o rotulo antigo (Task NNN - Layer - QA#N) desce pra
+    # subtitulo. Sem titulo_busca, comportamento igual a antes.
+    $cardTitle = if ($card.TituloBusca) { $card.TituloBusca } else { $label }
+    $funcHtml = if ($card.Function) { "<p class=`"func`">$(Esc $card.Function)</p>" } else { '' }
+    $headHtml = Get-CardHeadHtml $cardTitle $resumoBtnHtml
+    $subtitlesHtml = Get-CardSubtitlesHtml $label ([bool]$card.TituloBusca) $card.Repo
+    $footHtml = Get-CardFootHtml $updatedHtml $btnsHtml $chevronIcon
 
     return @"
 <div class="card qa-round-card" data-search="$searchBlob" data-repo="$repoLower" data-id="$cardId">
-  <div class="card-head">
-    <div class="card-head-left">
-      <span class="task-id" title="$(Esc $label)">$(Esc $label)</span>
-    </div>
-    <div class="card-head-right">
-      $resumoBtnHtml
-    </div>
-  </div>
-  <div class="repo-line"><span class="repo" title="$(Esc $card.Repo)">$(Esc $card.Repo)</span></div>
+$headHtml
+$subtitlesHtml
   $extLinksHtml
+  $funcHtml
   $fieldBoxesHtml
-  <div class="card-foot">
-    $updatedHtml
-    $btnsHtml
-  </div>
-  <button class="expand-btn" type="button" title="Expandir" aria-label="Expandir">$chevronIcon</button>
+$footHtml
 </div>
 "@
 }
@@ -1038,27 +1063,24 @@ function Build-UnifiedQaRoundCard($entries) {
     $updatedHtml = if ($entries[0].Round.DateLabel) { "<span class=`"updated`">Atualizado $(Esc $entries[0].Round.DateLabel)</span>" } else { '' }
     $repoLine = ($entries | ForEach-Object { $_.Card.Repo }) -join ' + '
     $repoLower = Esc(($repoLine).ToLowerInvariant())
-    $searchBlob = Esc(("$label $repoLine $teaserPlain").ToLowerInvariant())
+    $searchBlob = Esc(("$label $repoLine $($firstCard.TituloBusca) $teaserPlain").ToLowerInvariant())
     $cardId = Esc((($entries | ForEach-Object { "$($_.Round.TestesDoc.Path)#qa$($_.Round.RoundNum)" }) -join '+'))
+    # Mesmo tratamento do card normal/Build-QaRoundCard: titulo_busca (do
+    # card representante) vira o titulo, o rotulo antigo desce pra subtitulo.
+    $cardTitle = if ($firstCard.TituloBusca) { $firstCard.TituloBusca } else { $label }
+    $funcHtml = if ($firstCard.Function) { "<p class=`"func`">$(Esc $firstCard.Function)</p>" } else { '' }
+    $headHtml = Get-CardHeadHtml $cardTitle $resumoBtnHtml
+    $subtitlesHtml = Get-CardSubtitlesHtml $label ([bool]$firstCard.TituloBusca) $repoLine
+    $footHtml = Get-CardFootHtml $updatedHtml $btnsHtml $chevronIcon
 
     return @"
 <div class="card qa-round-card" data-search="$searchBlob" data-repo="$repoLower" data-id="$cardId">
-  <div class="card-head">
-    <div class="card-head-left">
-      <span class="task-id" title="$(Esc $label)">$(Esc $label)</span>
-    </div>
-    <div class="card-head-right">
-      $resumoBtnHtml
-    </div>
-  </div>
-  <div class="repo-line"><span class="repo" title="$(Esc $repoLine)">$(Esc $repoLine)</span></div>
+$headHtml
+$subtitlesHtml
   $extLinksHtml
+  $funcHtml
   $fieldBoxesHtml
-  <div class="card-foot">
-    $updatedHtml
-    $btnsHtml
-  </div>
-  <button class="expand-btn" type="button" title="Expandir" aria-label="Expandir">$chevronIcon</button>
+$footHtml
 </div>
 "@
 }
@@ -1126,14 +1148,7 @@ function Build-SummaryHtml([PSCustomObject]$card) {
 $faviconLink
 <title>Resumo - $(Esc $taskLabel)</title>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #1c1e21; --card-bg: #24262a; --card-border: #34373c;
-    --text: #e2e4e7; --text-dim: #93969e; --text-faint: #6d7078;
-    --gold: #b8935a; --gold-bright: #d9b26a; --gold-bg: #2e2717; --gold-border: #6b5628;
-  }
-  * { box-sizing: border-box; }
-  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+$sharedCss
   body {
     background: var(--bg); color: var(--text); max-width: 1080px;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -1273,33 +1288,30 @@ function Build-Card([PSCustomObject]$card) {
     $repoLayer = Get-RepoLayer $card.Repo
     $repoLayerLabel = if ($repoLayer) { $script:RepoLayerLabels[$repoLayer] } else { $null }
     $taskLabel = if ($card.Cluster) { if ($card.PseudoTask) { "$($card.Cluster) (#$($card.PseudoTask))" } else { $card.Cluster } } elseif ($card.Task -eq 'general') { if ($card.PseudoTask) { "Geral (#$($card.PseudoTask))" } else { 'Geral' } } elseif ($repoLayerLabel) { "Task $($card.Task) $($script:EmDash) $repoLayerLabel" } else { "Task $($card.Task)" }
-    $searchBlob = Esc(("$taskLabel $($card.Repo) $($card.Function)").ToLowerInvariant())
+    $searchBlob = Esc(("$taskLabel $($card.Repo) $($card.Function) $($card.TituloBusca)").ToLowerInvariant())
     $repoLower = Esc(($card.Repo).ToLowerInvariant())
     $cardId = Esc($card.RepPath)
+    # titulo_busca e' opcional (campo novo) - vira o titulo do card quando
+    # preenchido (achar por assunto); sem ele, o titulo continua sendo o
+    # antigo $taskLabel, que nesse caso NAO se repete como subtitulo (senao
+    # duplicaria a mesma linha 2x). $taskLabel sempre aparece como
+    # subtitulo quando titulo_busca existe - "titulo atual vira subtitulo".
+    $cardTitle = if ($card.TituloBusca) { $card.TituloBusca } else { $taskLabel }
+    $headHtml = Get-CardHeadHtml $cardTitle "$resumoBtnHtml`n      $starHtml"
+    $subtitlesHtml = Get-CardSubtitlesHtml $taskLabel ([bool]$card.TituloBusca) $card.Repo
+    $footHtml = Get-CardFootHtml $updatedHtml $btnsHtml $chevronIcon
 
     return @"
 <div class="card" data-search="$searchBlob" data-repo="$repoLower" data-id="$cardId">
-  <div class="card-head">
-    <div class="card-head-left">
-      <span class="task-id" title="$(Esc $taskLabel)">$(Esc $taskLabel)</span>
-    </div>
-    <div class="card-head-right">
-      $resumoBtnHtml
-      $starHtml
-    </div>
-  </div>
-  <div class="repo-line"><span class="repo" title="$(Esc $card.Repo)">$(Esc $card.Repo)</span></div>
+$headHtml
+$subtitlesHtml
   $extLinksHtml
   <p class="func">$(Esc $card.Function)</p>
   <div class="chips">
 $chipsHtml
   </div>
   $posHtml
-  <div class="card-foot">
-    $updatedHtml
-    $btnsHtml
-  </div>
-  <button class="expand-btn" type="button" title="Expandir" aria-label="Expandir">$chevronIcon</button>
+$footHtml
 </div>
 "@
 }
@@ -1329,15 +1341,8 @@ function Build-PaletteHtml() {
 $faviconLink
 <title>Biblioteca - Paleta de cores</title>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #1c1e21; --card-bg: #24262a; --card-border: #34373c;
-    --text: #e2e4e7; --text-dim: #93969e; --text-faint: #6d7078;
-    --gold: #b8935a; --gold-bright: #d9b26a; --gold-bg: #2e2717; --gold-border: #6b5628;
-    --current: #d97b3f; --current-glow: rgba(217, 123, 63, 0.28);
-  }
-  * { box-sizing: border-box; }
-  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+$sharedCss
+  :root { --current: #d97b3f; --current-glow: rgba(217, 123, 63, 0.28); }
   body {
     background: var(--bg); color: var(--text); max-width: 720px;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -1499,14 +1504,7 @@ function Build-ArchiveHtml() {
 $faviconLink
 <title>Biblioteca - Arquivo</title>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #1c1e21; --card-bg: #24262a; --card-border: #34373c;
-    --text: #e2e4e7; --text-dim: #93969e; --text-faint: #6d7078;
-    --gold: #b8935a; --gold-bright: #d9b26a; --gold-bg: #2e2717; --gold-border: #6b5628;
-  }
-  * { box-sizing: border-box; }
-  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+$sharedCss
   body {
     background: var(--bg); color: var(--text); max-width: 760px;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -1601,16 +1599,11 @@ function Build-NovaTaskHtml() {
 $faviconLink
 <title>Biblioteca - Nova Task</title>
 <style>
+$sharedCss
   :root {
-    color-scheme: dark;
-    --bg: #1c1e21; --card-bg: #24262a; --card-border: #34373c;
-    --text: #e2e4e7; --text-dim: #93969e; --text-faint: #6d7078;
-    --gold: #b8935a; --gold-bright: #d9b26a; --gold-bg: #2e2717; --gold-border: #6b5628;
     --azure-bg: #1f2a33; --azure-text: #7fa8c2; --azure-border: #3d5566;
     --claude-bg: #2e1f16; --claude-border: #a85a35; --claude-bright: #d97757;
   }
-  * { box-sizing: border-box; }
-  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
   html, body { height: 100%; }
   body {
     background: var(--bg); color: var(--text); max-width: 1400px;
@@ -1877,14 +1870,7 @@ function Build-PendenciasHtml() {
 $faviconLink
 <title>Biblioteca - Pendencias</title>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #1c1e21; --card-bg: #24262a; --card-border: #34373c;
-    --text: #e2e4e7; --text-dim: #93969e; --text-faint: #6d7078;
-    --gold: #b8935a; --gold-bright: #d9b26a; --gold-bg: #2e2717; --gold-border: #6b5628;
-  }
-  * { box-sizing: border-box; }
-  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+$sharedCss
   body {
     background: var(--bg); color: var(--text); max-width: 760px;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -2126,32 +2112,21 @@ $head = @'
 $faviconLink
 <title>Biblioteca - Dashboard</title>
 <style>
+$sharedCss
   :root {
-    color-scheme: dark;
-    --bg: #1c1e21;
-    --card-bg: #24262a;
-    --card-border: #34373c;
     --input-bg: #262931;
-    --text: #e2e4e7;
-    --text-dim: #93969e;
-    --text-faint: #6d7078;
-    --gold: #b8935a;
-    --gold-bright: #d9b26a;
-    --gold-bg: #2e2717;
-    --gold-border: #6b5628;
     --current: #d97b3f;
     --current-glow: rgba(217, 123, 63, 0.28);
     /* Teste: verde (do logo/livro, #22c55e) em vez do terracota - os 2
        botoes do header ficam verde+dourado, as 2 cores da propria marca
        da Biblioteca, junto no mesmo lugar. So' esta pagina usa esses
-       valores (cada pagina gerada tem seu proprio :root) - nao muda
-       .claude-btn em nova-task.html/outras paginas ainda. */
+       valores (cada pagina gerada tem seu proprio :root extra alem do
+       bloco de CSS compartilhado) - nao muda .claude-btn em
+       nova-task.html/outras paginas. */
     --claude-bg: #16281c;
     --claude-border: #2f6b45;
     --claude-bright: #4ade80;
   }
-  * { box-sizing: border-box; }
-  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
   body {
     background: var(--bg);
     color: var(--text);
@@ -2255,8 +2230,13 @@ $faviconLink
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-top: 16px; }
   .card {
     background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px;
-    padding: 14px 16px 34px; display: flex; flex-direction: column; gap: 8px; position: relative;
+    padding: 12px 14px; display: flex; flex-direction: column; gap: 0;
   }
+  /* Ritmo vertical explicito (sem gap generico no .card) - cada elemento
+     controla o proprio espaco ABAIXO dele, pra nao empilhar gap+margem
+     como acontecia antes (raiz do "espaco morto" entre titulo/subtitulos/
+     chip Azure). Ver .card-head/.subtitles/.ext-links/.func/.chips/
+     .position/.qa-field-boxes mais abaixo. */
   .card-current {
     border-color: var(--current); box-shadow: 0 0 0 1px var(--current), 0 0 16px -2px var(--current-glow);
   }
@@ -2276,30 +2256,37 @@ $faviconLink
   }
   .qa-field-text { font-size: 0.85rem; color: #c2c4c9; line-height: 1.42; margin: 0; }
   .qa-field-text strong { color: var(--gold-bright); font-weight: 600; }
-  .qa-round-card .task-id { white-space: normal; overflow: visible; text-overflow: clip; }
   .badge-current {
     align-self: flex-start; background: var(--current); color: #2b1d0a; font-weight: 700;
     font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase;
     padding: 3px 8px; border-radius: 999px;
   }
-  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .card-head-left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
-  .card-head-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+  .card-head-left { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
+  .card-head-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+  .card-title {
+    font-weight: 600; font-size: 0.92rem; color: var(--text); width: 100%; line-height: 1.25;
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card.expanded .card-title { -webkit-line-clamp: unset; line-clamp: unset; overflow: visible; }
   .task-id {
-    font-weight: 600; color: #fff; display: inline-block; max-width: 100%;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 500; color: var(--text-dim); font-size: 0.8rem; display: inline-block; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;
   }
+  /* Wrapper dos 2 subtitulos (task-id + repo) - zero espaco entre eles,
+     um unico bloco compacto entre o titulo e o chip Azure/func. */
+  .subtitles { display: flex; flex-direction: column; gap: 0; margin-bottom: 4px; }
+  .subtitle-line { margin: 0; }
   .repo {
-    font-family: ui-monospace, "SF Mono", monospace; font-size: 0.8rem; color: var(--gold-bright);
-    display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, "SF Mono", monospace; font-size: 0.78rem; color: var(--gold);
+    display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;
   }
-  .repo-line { margin: 2px 0 8px; }
+  .repo-line { margin: 0 0 8px; }
+  .subtitles .repo-line { margin: 0; }
   .func {
-    font-size: 0.88rem; color: #c2c4c9; margin: 0; line-height: 1.35;
-    display: -webkit-box; -webkit-line-clamp: 1; line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+    font-size: 0.88rem; color: #c2c4c9; margin: 0 0 8px; line-height: 1.35;
   }
-  .card.expanded .func { display: block; -webkit-line-clamp: unset; overflow: visible; }
-  .ext-links { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ext-links { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .ext-link {
     display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 500;
     padding: 4px 10px; border-radius: 999px; text-decoration: none;
@@ -2322,17 +2309,17 @@ $faviconLink
   .star-btn:hover .star-icon { stroke: var(--current); }
   .card-current .star-icon { fill: var(--current); stroke: var(--current); }
   .expand-btn {
-    position: absolute; right: 12px; bottom: 10px;
+    flex-shrink: 0; margin-left: auto;
     border: 1px solid var(--card-border); border-radius: 6px; width: 22px; height: 22px;
     justify-content: center; transition: transform .15s, color .15s, border-color .15s;
   }
   .expand-btn:hover { color: var(--gold-bright); border-color: var(--gold-border); }
   .card.expanded .expand-btn { transform: rotate(180deg); }
   .chips, .position, .btns, .qa-field-boxes { display: none; }
-  .card.expanded .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .card.expanded .position { display: flex; }
+  .card.expanded .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .card.expanded .position { display: flex; margin-bottom: 8px; }
   .card.expanded .btns { display: flex; gap: 6px; flex-wrap: wrap; }
-  .card.expanded .qa-field-boxes { display: flex; }
+  .card.expanded .qa-field-boxes { display: flex; margin-bottom: 8px; }
   /* Hora do "Atualizado": sempre visivel em Ativas, so' ao expandir em
      Completas - card fechado mostra so a data, sem poluir a grade. */
   .updated-time { display: none; }
@@ -2361,7 +2348,7 @@ $faviconLink
   .layer-pending .layer-state { color: #f0908a; }
   .layer-na .layer-dot { background: #eab308; }
   .layer-na .layer-state { color: #d9c069; }
-  .card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 6px; padding-right: 26px; gap: 8px; flex-wrap: wrap; }
+  .card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 6px; gap: 8px; flex-wrap: wrap; }
   .updated { font-size: 0.72rem; color: var(--text-faint); }
   .copy-btn {
     background: var(--gold-bg); color: var(--text); border: 1px solid var(--gold-border); border-radius: 6px;
@@ -2398,7 +2385,13 @@ $faviconLink
 </head>
 <body>
 '@
-$head = $head.Replace('$faviconLink', $faviconLink)
+# CUIDADO: .Replace('$sharedCss', ...) e' substituicao de texto literal, cega
+# a contexto - se algum comentario dentro do heredoc $head/$foot (que sao
+# single-quoted, nao interpolam) escrever a string literal "$sharedCss" ou
+# "$faviconLink", ela tambem sera trocada (bug real, encontrado e corrigido
+# nesta mesma rodada). Nunca escrever esses 2 nomes literalmente em
+# comentario dentro de $head/$foot - descrever por extenso em vez disso.
+$head = $head.Replace('$faviconLink', $faviconLink).Replace('$sharedCss', $sharedCss)
 
 $foot = @'
 <script>
@@ -2430,13 +2423,27 @@ if (quickBtn) {
   });
 }
 
+// Expandir um card expande a linha visual inteira do grid junto (mesmo
+// offsetTop no momento do clique - recalculado a cada clique, nunca
+// cacheado, porque a linha muda com resize/filtro/busca). So' cards
+// visiveis (offsetParent !== null) entram no grupo.
 document.querySelectorAll('.expand-btn').forEach(function (btn) {
   btn.addEventListener('click', function () {
     var card = btn.closest('.card');
-    card.classList.toggle('expanded');
-    var expanded = card.classList.contains('expanded');
-    btn.title = expanded ? 'Recolher' : 'Expandir';
-    btn.setAttribute('aria-label', btn.title);
+    var grid = card.closest('.grid');
+    var expand = !card.classList.contains('expanded');
+    var rowTop = card.offsetTop;
+    var rowCards = grid ? Array.prototype.filter.call(grid.querySelectorAll('.card'), function (c) {
+      return c.offsetParent !== null && c.offsetTop === rowTop;
+    }) : [card];
+    rowCards.forEach(function (c) {
+      c.classList.toggle('expanded', expand);
+      var b = c.querySelector('.expand-btn');
+      if (b) {
+        b.title = expand ? 'Recolher' : 'Expandir';
+        b.setAttribute('aria-label', b.title);
+      }
+    });
   });
 });
 

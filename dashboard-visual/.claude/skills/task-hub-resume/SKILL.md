@@ -99,7 +99,11 @@ precisar de julgamento.
    procurando um stash rotulado `checkpoint/<taskId selecionada>: ...` de
    uma pausa anterior (pode nao ser o mais recente da lista - combinar
    pelo rotulo, nao pela posicao). Se achar, `git stash pop`.
-5. **Reler os dados da task:** abrir os docs relacionados na Biblioteca
+5. **Reler os dados da task:** checar primeiro se existe
+   `progresso/{taskId}-{slug}.md` na Biblioteca (tipo `progresso`, ver
+   `controle-documentacao`) — se existir, e' ele que tem o estado real da
+   implementacao (pode divergir do `task-planning`, que so' reflete o
+   plano original). Depois abrir os demais docs relacionados
    (`task-code`/`task-planning`/`testes`/`reqs`, o que existir via
    `related:` no frontmatter) e resumir o que ja foi feito, o que falta,
    e qualquer pendencia registrada (ex: "aguardando resposta do PO").

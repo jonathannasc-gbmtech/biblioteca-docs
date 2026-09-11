@@ -53,7 +53,10 @@ evento "Task resolvida? = sim" (tabela de Gatilhos automáticos) e o
    - **O que falta:** esvaziar/atualizar (vazio se nada ficou pendente, ou
      listar follow-ups conhecidos).
    - `status: completed` nele também.
-7. Rodar `scripts\sync-all.ps1` da Biblioteca.
+7. Se existir `progresso/{taskId}-{slug}.md` pra essa task: mover pra
+   `_archive/progresso/`, com uma nota de 1 linha (motivo do arquivamento
+   + task) — nao apagar, nao deixar solto em `progresso/`.
+8. Rodar `scripts\sync-all.ps1` da Biblioteca.
 
 **Se qualquer item acima não puder ser confirmado** (falta cobertura de
 uma camada, REQ não localizado, formato de artefato não bate) — **parar e

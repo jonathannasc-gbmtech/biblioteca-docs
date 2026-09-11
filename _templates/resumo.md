@@ -5,6 +5,7 @@ status: in_progress
 repo: nome-do-seu-repo
 task: TASK_ID
 function: Resumo executivo da task - uma linha
+titulo_busca: CRUD maritimo backend — folders/berths/scales  # obrigatorio - palavras-chave da tarefa, curto (bater o olho e entender)
 stub: —
 related:
   - reqs/TASK_ID-slug.md
