@@ -7,13 +7,13 @@ task: general
 function: Regras da Biblioteca
 stub: —
 cluster: Regras da Biblioteca
-updated: 2026-08-24
+updated: 2026-09-10
 author: —
 ---
 # Regras da Biblioteca
 
 <!-- badge:auto -->
-✅ **Concluido** | `geral` | 24/08/2026
+✅ **Concluido** | `geral` | 10/09/2026
 <!-- /badge:auto -->
 
 Referência humana — resumo condensado. Agentes seguem a versão operacional
@@ -38,12 +38,13 @@ Biblioteca/
 │   ├── scripts/                # sync-header, lint-clusters, build-index, sync-all, pre-commit-check
 │   ├── dashboard-visual/        # dashboard HTML gerado + skills locais (task-hub-*)
 │   └── docs/screenshots/        # imagens do README
-├── _templates/                # task-code, task-planning, testes, resumo, handover-tecnico
-├── task-code/{frontend,backend}/
-├── task-planning/{frontend,backend}/
-├── testes/{frontend,backend}/
-├── resumo/{frontend,backend}/
-├── handover-tecnico/{frontend,backend}/
+├── _templates/                # task-code, task-planning, testes, resumo, handover-tecnico, progresso
+├── task-code/
+├── task-planning/
+├── testes/
+├── resumo/
+├── handover-tecnico/
+├── progresso/                  # doc de trabalho, sobrescrito, fora do indice numerado e do sync-all.ps1
 ├── reqs/                       # REQ/card original verbatim, fora do indice numerado
 ├── planos/                     # backup automatico de todo plano de ExitPlanMode (hook), fora do indice numerado
 └── _archive/                   # docs substituidos ou anteriores a esta convencao
@@ -62,8 +63,13 @@ Biblioteca/
 | `handover-tecnico` | Módulo, playbook, contrato, convenções, debug consolidado |
 | `reqs` | Card/issue do seu rastreador de tarefas (+ item pai, se houver) colado verbatim — referência crua, fora do índice numerado e do `sync-all.ps1` |
 | `planos` | Cópia bruta de cada plano aprovado em `ExitPlanMode` — sem vínculo com task/repo, backup histórico. Copiado automaticamente por hook (`~/.claude/settings.json`, `PermissionRequest` no matcher `ExitPlanMode`), não por ação manual do agente. Fora do índice numerado e do `sync-all.ps1` |
+| `progresso` | Doc de trabalho por task, sobrescrito (não log) — reflete o estado atual da implementação, pra sobreviver a sessão cair no meio. Atualizado a cada divergência relevante do `task-planning`. Fora do índice numerado e do `sync-all.ps1`; arquivado em `_archive/progresso/` quando a task fecha |
 
-**Camada (`repo:` → pasta):** o valor de `repo:` decide `frontend/` ou `backend/` — ex. `meu-app-frontend` → `.../frontend/`, `meu-app-backend` → `.../backend/`.
+**Camada (`repo:`):** não há mais subpasta `frontend/`/`backend/` — o
+valor de `repo:` já basta pra qualquer script/dashboard diferenciar a
+camada (convenção de nome: sufixo `-backend`, prefixo `mfe-`/`mobile-` =
+frontend). `meu-app-frontend` e `meu-app-backend` moram os dois na mesma
+pasta do tipo, só o `repo:` muda.
 
 ---
 
@@ -84,6 +90,12 @@ handover-tecnico:                {taskId|pseudo_task|general}-{slug}-handover-te
 Ex.: `101034-terminal-side-sheet.md` (task-code), `101034-aurora-sheet-testes.md`
 (testes), `901-checkpoint-melhorias-biblioteca-handover-tecnico.md`
 (handover-tecnico, `task: general` com `pseudo_task: 901`).
+
+**Colisão backend+frontend com o mesmo slug:** como a pasta não diferencia
+mais camada, se backend e frontend da mesma task gerariam o mesmo nome de
+arquivo, sufixar com `-backend`/`-frontend` no final do nome — ex.:
+`103269-consulta-road-backend.md` e `103269-consulta-road-frontend.md`.
+Sem colisão real, não sufixar à toa.
 
 Exceção: `reqs/` usa `{taskId}-{slug}.md` — sem número sequencial, sem frontmatter obrigatório (é cópia de referência, não doc de ciclo de vida).
 
@@ -141,17 +153,24 @@ se o resumo não bastar.
 
 ## Templates
 
-Campos base de todos os 5 templates em `_templates/`:
+Campos base dos 5 templates com ciclo de vida em `_templates/`:
 
 ```
-number, type, status, repo, task, function, stub, related, updated, author
+number, type, status, repo, task, function, titulo_busca, stub, related, updated, author
 ```
 
 `task-planning.md` soma `plan_active`. `cluster`, `pseudo_task` e
 `pr_pending`/`pr_merged`/`pr_rejected` **não** vêm nos templates — são
 exceções aplicadas depois (cluster + pseudo_task na hora de rotular uma
 task `general`; os `pr_*` só são escritos pelo sweep automático, nunca à
-mão).
+mão). `titulo_busca` é **obrigatório** — título curto do que foi
+**feito**, com as palavras-chave da tarefa (nomes de tela/endpoint/
+funcionalidade), pra bater o olho no card e já entender do que se trata
+sem ler mais nada. Vira o título do card no dashboard — o `taskLabel`
+antigo ("Task NNN — Backend") desce pra subtítulo, junto do repo.
+
+`progresso.md` é o 6º template, mas fora desse padrão — frontmatter
+mínimo (`task`, `repo`, `updated`), sem `number:`.
 
 ---
 
@@ -164,6 +183,7 @@ mão).
 | `build-index.ps1` | Gera `INDEX.md` + `CATALOGO.md` |
 | `dashboard-visual/scripts/build-dashboard.ps1` | Gera o dashboard (`dashboard.html`, `paleta.html`, `archive.html`, `summaries/*.html`) |
 | `sync-all.ps1` | Roda os 4 acima em ordem (aborta em `sync-header`/`lint-clusters` se achar problema) — sempre rodar depois de editar |
+| `unify-type-folders.ps1` | Migração pontual (já rodada) — removeu a subpasta `frontend`/`backend` de dentro de cada tipo. Não precisa rodar de novo |
 | `.git/hooks/pre-commit` → `pre-commit-check.ps1` | Trava o commit se um `.md` estiver corrompido/anormal — automático, não precisa lembrar |
 
 O agente **não** edita tabela, `INDEX.md` nem `CATALOGO.md` manualmente.

@@ -69,7 +69,7 @@ exatamente os passos 1-5 da "Rotina de retomada" em
   Detalhe adicional (verificação, tabela de resultado, incidentes,
   causa raiz aprofundada, etc.) é livre e vai **depois** desses 3
   bullets, no mesmo padrão de sempre. Exemplo real já nesse formato:
-  `testes/backend/104691-page-relation-fix-migrations-testes.md`.
+  `testes/104691-page-relation-fix-migrations-testes.md`.
 - **Toca o `resumo`** da task+repo (gatilho já existente em
   `controle-documentacao` pra qualquer atualização de doc da task) —
   **reescrever** "Status atual" pro snapshot do estado atual (branch, PR

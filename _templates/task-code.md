@@ -5,6 +5,7 @@ status: draft
 repo: nome-do-seu-repo
 task: TASK_ID
 function: Resumo do card/issue — uma linha
+titulo_busca: Reativacao toggle inline classification-metrics  # obrigatorio - palavras-chave da tarefa, curto (bater o olho e entender)
 stub: —
 related:
   - handover-tecnico/903-aurora-sheet-handover-tecnico.md
@@ -14,7 +15,13 @@ author: —
 
 # Task code — {titulo}
 
-Card/issue original / especificacao tecnica para abrir a branch.
+Spec técnica pra abrir a branch — **só o que vai pro Azure/card**. Sem
+contexto de sessão, decisão interna da Biblioteca ou histórico de
+conversa — quem lê isso é o card do rastreador, não um humano com o
+contexto desta sessão.
+
+Tom profissional (sem gírias/contrações informais, sem robótico). Sem
+"nós"/"nosso" — voz neutra, a documentação é do usuário.
 
 ## Contexto
 
@@ -24,6 +31,9 @@ Card/issue original / especificacao tecnica para abrir a branch.
 
 ## Fora de escopo
 
-## Referencias tecnicas
+## Referências técnicas
 
-## Criterios de aceite
+Arquivos/padrões de código relevantes pra abrir a branch — não links pra
+outros docs da Biblioteca (isso é o campo `related:` do YAML).
+
+## Critérios de aceite

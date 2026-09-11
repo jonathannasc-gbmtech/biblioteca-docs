@@ -213,7 +213,7 @@ function Build-RelatedSection($meta) {
 
 function Serialize-Frontmatter($meta) {
     $lines = @('---')
-    $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'stub', 'cluster', 'pseudo_task', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
+    $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'titulo_busca', 'stub', 'cluster', 'pseudo_task', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
     foreach ($key in $order) {
         if (-not $meta.Contains($key)) { continue }
         if ($key -eq 'related') {
@@ -286,6 +286,7 @@ function Get-DocumentFiles([string]$root) {
         Where-Object {
             $_.FullName -notmatch '[\\/]_templates[\\/]' -and
             $_.FullName -notmatch '[\\/]_archive[\\/]' -and
+            $_.FullName -notmatch '[\\/]progresso[\\/]' -and
             $_.Name -notin @('INDEX.md', 'README.md', 'CATALOGO.md') -and
             $_.DirectoryName -notmatch '[\\/]scripts[\\/]'
         }
