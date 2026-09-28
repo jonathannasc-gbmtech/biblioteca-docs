@@ -42,7 +42,9 @@ Uma página HTML estática, salva nos favoritos do navegador.
    repo — ele é o starter kit limpo) e clone o repo criado.
 2. Abra o Claude Code dentro dele. A skill `biblioteca-setup` pergunta seu
    nome, a pasta dos seus repos e (opcional) um link do Azure DevOps, grava
-   `biblioteca.config.json` e abre o dashboard.
+   `biblioteca.config.json`, instala as skills e hooks globais
+   (`install-global.ps1` — pra funcionar de dentro de qualquer repo) e abre
+   o dashboard.
 3. Opcional: peça *"roda a skill importar-historico-github"* pra povoar o
    dashboard com seus PRs antigos.
 
@@ -75,8 +77,9 @@ Tipos, status, nomenclatura e estrutura completa:
 | `biblioteca-pdf-export` | Converte um doc em PDF no tema do dashboard (pra mandar pra PO/QA) |
 | `task-hub-resume` / `-qa` / `-complete` | Acionadas pelos botões do dashboard |
 
-Ficam em `.claude/skills/` e `dashboard-visual/.claude/skills/` — carregam
-sozinhas ao abrir o Claude Code no repo.
+Ficam em `.claude/skills/` e `dashboard-visual/.claude/skills/`.
+`controle-documentacao` e `biblioteca-pdf-export` também viram globais
+(junction em `~/.claude/skills`, feito no setup).
 
 ## Limitações
 
