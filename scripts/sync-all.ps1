@@ -18,6 +18,8 @@ if ($LASTEXITCODE) {
     exit 1
 }
 & (Join-Path $PSScriptRoot 'build-index.ps1') -ParsedDocs $parsedDocs
-$dashboardScript = Join-Path $root '_ferramenta\dashboard-visual\scripts\build-dashboard.ps1'
+# Relativo a $PSScriptRoot, nao a $root - export publico e' flat (sem
+# _ferramenta/), mesmo motivo do pre-commit-check.ps1.
+$dashboardScript = Join-Path $PSScriptRoot '..\dashboard-visual\scripts\build-dashboard.ps1'
 if (Test-Path $dashboardScript) { & $dashboardScript -ParsedDocs $parsedDocs }
 Write-Host 'sync-all: concluido.'

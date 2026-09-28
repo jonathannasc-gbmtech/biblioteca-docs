@@ -1,6 +1,9 @@
 # Shared helpers - Biblioteca de Handovers (ponytail: single PS lib, no framework)
 
-$script:LibRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+# Pessoal: raiz/_ferramenta/scripts. Export publico (biblioteca-docs) e'
+# flat: raiz/scripts - '..\..' fixo la' caia na pasta ACIMA do repo.
+$script:LibRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ((Split-Path $script:LibRoot -Leaf) -eq '_ferramenta') { $script:LibRoot = Split-Path $script:LibRoot -Parent }
 
 $script:TypeLabels = @{
     'rules' = 'Regras'

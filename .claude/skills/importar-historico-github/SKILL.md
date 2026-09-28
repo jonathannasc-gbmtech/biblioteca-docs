@@ -21,23 +21,14 @@ Nunca dispara sozinha, nunca bloqueia o setup normal.
 
 ## O que faz
 
-Roda `_ferramenta/scripts/backfill-github-prs.ps1`, que:
+Roda `scripts/backfill-github-prs.ps1`, que:
 
 1. Busca via `gh search prs --owner {org} --author @me` (mergeadas +
    abertas) - sem precisar clonar nenhum repo.
-2. Classifica cada PR pelo **titulo**, em 3 trilhas (cada PR cai na
-   primeira que bater - nenhuma delas adivinha um numero de task, so'
-   organiza pelo que ja esta escrito no titulo):
-   - **Numerica** - convencao de commitlint do GBM (`tipo(NNNNN): assunto`
-     ou `tipo(NNNNN-slug): assunto`) -> vira task numerica de verdade.
-   - **Scope (fallback)** - conventional commit generico com escopo
-     nao-numerico (`tipo(scope): assunto`, ex.: `fix(wagons): ...`, pra
-     quem nao usa numero de task no escopo do commit) -> vira
-     `task: general` + `cluster: {scope}`, agrupado por scope+repo.
-   - **Titulo avulso (fallback)** - sem escopo nenhum (ex.: `Develop`,
-     `Revert ...`) -> vira `task: general` + `cluster: {titulo tal como
-     veio}`, agrupado por titulo+repo (titulo identico no mesmo repo cai
-     no mesmo card).
+2. Classifica cada PR pelo **titulo**, em 3 trilhas com fallback em cascata
+   (numerica → scope → titulo avulso; ver cabecalho/logica de
+   `backfill-github-prs.ps1` pras regras exatas - nao restatar aqui, senao
+   as duas fontes divergem no dia que o script mudar).
 3. Agrupa por task+repo (task numerica) ou cluster+repo (fallback) - uma
    task cross-repo vira um card por repo, igual ao resto da Biblioteca -
    e classifica frontend/backend pelo nome do repo (mesma convencao do
@@ -71,7 +62,7 @@ rodar `sync-all.ps1`, nao ha comando dedicado ainda).
 ## Como rodar
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File _ferramenta/scripts/backfill-github-prs.ps1 -Org gbmtech
+powershell -ExecutionPolicy Bypass -File scripts/backfill-github-prs.ps1 -Org gbmtech
 ```
 
 Reportar ao usuario, ao final (o proprio script ja imprime isso): quantos
