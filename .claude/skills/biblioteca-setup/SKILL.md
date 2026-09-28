@@ -90,14 +90,17 @@ sugerir commitar.
 
 ## Depois de gravar
 
-1. Rodar `powershell -ExecutionPolicy Bypass -File scripts/sync-all.ps1`.
-   Instalar o guard de pre-commit (bloqueia commit de `.md` corrompido —
-   `.git/hooks/` não é versionado, cada clone precisa criar o seu), só se
-   `.git/hooks/pre-commit` ainda não existir:
-   ```sh
-   printf '#!/bin/sh\npowershell -ExecutionPolicy Bypass -File "$(git rev-parse --show-toplevel)/scripts/pre-commit-check.ps1"\nexit $?\n' > .git/hooks/pre-commit
-   ```
-2. Confirmar que rodou sem erro (lint-clusters ok, dashboard gerado).
+1. Rodar `powershell -ExecutionPolicy Bypass -File scripts/install-global.ps1`
+   — deixa a Biblioteca funcionando com o Claude aberto em **qualquer**
+   repo (o uso normal é trabalhar no repo do projeto e gravar doc aqui):
+   junction de `controle-documentacao`/`biblioteca-pdf-export` em
+   `~/.claude/skills`, hooks globais em `~/.claude/settings.json` (sync
+   após gravar doc, backup de plano em `planos/`; faz backup `.bak-*` do
+   settings antes) e o guard de pre-commit. Idempotente.
+   Avisar o usuário: os hooks só valem a partir da **próxima** sessão do
+   Claude Code.
+2. Rodar `powershell -ExecutionPolicy Bypass -File scripts/sync-all.ps1`
+   e confirmar que rodou sem erro (lint-clusters ok, dashboard gerado).
 3. **Abrir o dashboard sozinho no navegador** — não só avisar o usuário
    pra abrir manualmente (ele não deve precisar navegar até o arquivo):
    `Start-Process "dashboard-visual/dashboard.html"` (path
