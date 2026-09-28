@@ -72,6 +72,7 @@ Tipos, status, nomenclatura e estrutura completa:
 | `controle-documentacao` | Gate pra criar/editar qualquer doc (template, status, sync) |
 | `biblioteca-setup` | Cadastro guiado na primeira sessão |
 | `importar-historico-github` | Gera `resumo/` a partir dos seus PRs no GitHub |
+| `biblioteca-pdf-export` | Converte um doc em PDF no tema do dashboard (pra mandar pra PO/QA) |
 | `task-hub-resume` / `-qa` / `-complete` | Acionadas pelos botões do dashboard |
 
 Ficam em `.claude/skills/` e `dashboard-visual/.claude/skills/` — carregam

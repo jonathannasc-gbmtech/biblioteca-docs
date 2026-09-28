@@ -91,6 +91,12 @@ sugerir commitar.
 ## Depois de gravar
 
 1. Rodar `powershell -ExecutionPolicy Bypass -File scripts/sync-all.ps1`.
+   Instalar o guard de pre-commit (bloqueia commit de `.md` corrompido —
+   `.git/hooks/` não é versionado, cada clone precisa criar o seu), só se
+   `.git/hooks/pre-commit` ainda não existir:
+   ```sh
+   printf '#!/bin/sh\npowershell -ExecutionPolicy Bypass -File "$(git rev-parse --show-toplevel)/scripts/pre-commit-check.ps1"\nexit $?\n' > .git/hooks/pre-commit
+   ```
 2. Confirmar que rodou sem erro (lint-clusters ok, dashboard gerado).
 3. **Abrir o dashboard sozinho no navegador** — não só avisar o usuário
    pra abrir manualmente (ele não deve precisar navegar até o arquivo):

@@ -1,5 +1,6 @@
 .sync-lock
 biblioteca.config.json
+__pycache__/
 
 # Gerado - cada clone produz o proprio
 INDEX.md
