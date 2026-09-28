@@ -2712,9 +2712,13 @@ Atualize seu favorito.</p>
 <script>location.replace('../_ferramenta/dashboard-visual/dashboard.html');</script>
 </body></html>
 "@
+# Export publico e' flat: raiz/dashboard-visual/ E' o hub - sem esse guard
+# o redirect sobrescreve o proprio dashboard recem-gerado.
 $legacyDir = Join-Path $root 'dashboard-visual'
-New-Item -ItemType Directory -Force -Path $legacyDir | Out-Null
-[System.IO.File]::WriteAllText((Join-Path $legacyDir 'dashboard.html'), $legacyRedirect)
+if ([IO.Path]::GetFullPath($legacyDir).TrimEnd('\') -ne [IO.Path]::GetFullPath($hubRoot).TrimEnd('\')) {
+    New-Item -ItemType Directory -Force -Path $legacyDir | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $legacyDir 'dashboard.html'), $legacyRedirect)
+}
 
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'paleta.html'), (Build-PaletteHtml))
 [System.IO.File]::WriteAllText((Join-Path $hubRoot 'archive.html'), (Build-ArchiveHtml))

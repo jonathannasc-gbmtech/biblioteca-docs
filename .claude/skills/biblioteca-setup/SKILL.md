@@ -70,7 +70,7 @@ Se o MCP não estiver instalado/conectado nessa máquina, avisar que
 `azureOrgUrl` ainda funciona sozinho (link direto nos cards), só o
 preenchimento automático de REQ/parent do "+ Nova Task" fica indisponível
 até o MCP ser configurado (`claude mcp add --scope user`, ver
-`_ferramenta/dashboard-visual/CLAUDE.md`) — não é bloqueante pro resto da
+`dashboard-visual/CLAUDE.md`) — não é bloqueante pro resto da
 Biblioteca.
 
 ## Gravar o config
@@ -90,11 +90,11 @@ sugerir commitar.
 
 ## Depois de gravar
 
-1. Rodar `powershell -ExecutionPolicy Bypass -File _ferramenta/scripts/sync-all.ps1`.
+1. Rodar `powershell -ExecutionPolicy Bypass -File scripts/sync-all.ps1`.
 2. Confirmar que rodou sem erro (lint-clusters ok, dashboard gerado).
 3. **Abrir o dashboard sozinho no navegador** — não só avisar o usuário
    pra abrir manualmente (ele não deve precisar navegar até o arquivo):
-   `Start-Process "_ferramenta/dashboard-visual/dashboard.html"` (path
+   `Start-Process "dashboard-visual/dashboard.html"` (path
    relativo à raiz do repo — o handler default do Windows pra `.html` é o
    navegador). Depois, avisar: "Configurado — já abri o dashboard no
    navegador. Comece criando sua primeira task pela skill
